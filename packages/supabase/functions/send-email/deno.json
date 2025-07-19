@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.ns", "deno.unstable"]
+  },  
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --allow-read index.ts"
+  }
+}

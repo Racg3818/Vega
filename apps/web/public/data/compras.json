@@ -1,0 +1,90 @@
+[
+  {
+    "ativo": "CDB Banco Original 2029",
+    "classe": "POS",
+    "taxaInformada": "130.00% CDI",
+    "taxaEfetiva": "130.00% CDI",
+    "valorMinimo": "R$ 1.000,00",
+    "valorComprado": "R$ 15.500,00",
+    "saldoAntesCompra": "R$ 10.000,00",
+    "vencimento": "01/03/2029",
+    "horarioCompra": "22/06/2025 14:45:12"
+  },
+  {
+    "ativo": "CDB Banco XP 2026",
+    "classe": "PRE",
+    "taxaInformada": "12.50%",
+    "taxaEfetiva": "12.50% (isento IR)",
+    "valorMinimo": "R$ 1.000,00",
+    "valorComprado": "R$ 252.500,00",
+    "saldoAntesCompra": "R$ 9.500,00",
+    "vencimento": "15/10/2026",
+    "horarioCompra": "22/06/2025 14:47:08"
+  },
+  {
+    "ativo": "LCA Banco Itaú 2035",
+    "classe": "INFLACAO",
+    "taxaInformada": "5.70%",
+    "taxaEfetiva": "IPCA + 5.70%",
+    "valorMinimo": "R$ 30,00",
+    "valorComprado": "R$ 1.200,00",
+    "saldoAntesCompra": "R$ 7.500,00",
+    "vencimento": "15/05/2035",
+    "horarioCompra": "22/06/2025 14:50:29"
+  },
+  {
+    "ativo": "LCI Banco Alfa 2027",
+    "classe": "PRE",
+    "taxaInformada": "11.80%",
+    "taxaEfetiva": "11.80% (isento IR)",
+    "valorMinimo": "R$ 1.000,00",
+    "valorComprado": "R$ 158.000,00",
+    "saldoAntesCompra": "R$ 6.300,00",
+    "vencimento": "30/09/2027",
+    "horarioCompra": "22/06/2025 14:53:12"
+  },
+  {
+    "ativo": "CDB Pós Banco BMG 2028",
+    "classe": "POS",
+    "taxaInformada": "112.00%",
+    "taxaEfetiva": "112.00% CDI",
+    "valorMinimo": "R$ 500,00",
+    "valorComprado": "R$ 240.000,00",
+    "saldoAntesCompra": "R$ 5.000,00",
+    "vencimento": "20/12/2028",
+    "horarioCompra": "22/06/2025 14:55:10"
+  },
+  {
+    "ativo": "LCI Banco do Brasil 2040",
+    "classe": "INFLACAO",
+    "taxaInformada": "6.70%",
+    "taxaEfetiva": "IPCA + 6.70%",
+    "valorMinimo": "R$ 30,00",
+    "valorComprado": "R$ 1.200,00",
+    "saldoAntesCompra": "R$ 7.500,00",
+    "vencimento": "15/05/2040",
+    "horarioCompra": "22/06/2025 14:50:29"
+  },
+  {
+    "ativo": "CDB Banco PAN 2030",
+    "classe": "POS",
+    "taxaInformada": "115.00% CDI",
+    "taxaEfetiva": "115.00% CDI",
+    "valorMinimo": "R$ 1.000,00",
+    "valorComprado": "R$ 1.200,00",
+    "saldoAntesCompra": "R$ 7.500,00",
+    "vencimento": "15/05/2035",
+    "horarioCompra": "22/06/2025 14:50:29"
+  },
+  {
+    "ativo": "CDB Pós Banco BMG 2025",
+    "classe": "POS",
+    "taxaInformada": "120.00%",
+    "taxaEfetiva": "120.00% CDI",
+    "valorMinimo": "R$ 1.500,00",
+    "valorComprado": "R$ 25.000,00",
+    "saldoAntesCompra": "R$ 5.000,00",
+    "vencimento": "20/12/2025",
+    "horarioCompra": "22/06/2025 14:55:10"
+  }
+]

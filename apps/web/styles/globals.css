@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .vega-bg { @apply bg-vega-background text-vega-text; }
+  .vega-surface { @apply bg-vega-surface text-vega-text; }
+  .vega-card {
+    @apply bg-vega-surface p-6 rounded-xl shadow-inner text-vega-text;
+  }
+  .vega-title { @apply text-sm font-bold text-vega-text; }
+  .vega-number { @apply text-xl font-bold text-vega-accent; }
+  .vega-label { @apply text-xs text-vega-primary uppercase tracking-wider; }
+  .vega-button {
+    @apply bg-vega-primary text-white px-4 py-2 rounded font-semibold hover:bg-vega-accent transition;
+  }
+  .vega-menu-item {
+    @apply flex items-center gap-2 p-2 rounded cursor-pointer text-vega-text hover:bg-vega-primary/20 transition;
+  }
+  .vega-menu-active {
+    @apply text-vega-accent font-bold;
+  }
+}
