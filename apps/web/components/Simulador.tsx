@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { parseISO, differenceInMonths } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { CircleDollarSign, CalendarDays, Percent, TrendingUp, PiggyBank, FileText } from "lucide-react";
+import { CircleDollarSign, CalendarDays, Percent } from "lucide-react";
 
 function calcularDiasUteis(inicio: Date, fim: Date, feriados: Date[]) {
   let count = 0;
@@ -40,7 +40,7 @@ function formatarValor(valor: number): string {
 export default function Simulador() {
   const [valor, setValor] = useState(10000);
   const [valorInput, setValorInput] = useState(formatarValor(10000));
-  const [taxa, setTaxa] = useState(13.3);
+  const [taxa, setTaxa] = useState(17);
   const [vencimento, setVencimento] = useState("");
   const [feriados, setFeriados] = useState<Date[]>([]);
   const [tipoIndexador, setTipoIndexador] = useState("pre");
@@ -101,9 +101,9 @@ export default function Simulador() {
 
   const handleTipoIndexadorChange = (tipo: string) => {
     setTipoIndexador(tipo);
-    if (tipo === "pre") setTaxa(13.3);
-    if (tipo === "ipca") setTaxa(7);
-    if (tipo === "pos") setTaxa(110);
+    if (tipo === "pre") setTaxa(17);
+    if (tipo === "ipca") setTaxa(8);
+    if (tipo === "pos") setTaxa(120);
     setMostrarResultado(false);
   };
 
@@ -130,13 +130,21 @@ export default function Simulador() {
   const impostoRenda = rendimentoBruto * aliquota;
   const rendimentoLiquido = rendimentoBruto - impostoRenda;
 
-  let taxaServico = 0;
-  if (meses <= 1) taxaServico = 0.001;
-  else if (meses <= 12) taxaServico = 0.012;
-  else if (meses <= 24) taxaServico = 0.024;
-  else if (meses <= 60) taxaServico = 0.024;
+  // 💰 NOVO CÁLCULO DE SERVIÇO
+  const mensalidadeFixa = 20.0;
+  let taxaMediaMercado = 0;
 
-  const valorServico = valor * taxaServico;
+  if (tipoIndexador === "pre") {
+    taxaMediaMercado = 15.5;
+  } else if (tipoIndexador === "ipca" && ipca !== null) {
+    taxaMediaMercado = ipca + 7.0;
+  } else if (tipoIndexador === "pos" && cdi !== null) {
+    taxaMediaMercado = (cdi * 110) / 100;
+  }
+
+  const diferencaPositiva = Math.max(taxaEfetiva - taxaMediaMercado, 0);
+  const taxaVariavel = diferencaPositiva * 0.2 * valor / 100;
+  const valorServico = mensalidadeFixa + taxaVariavel;
 
   return (
     <div className="vega-card space-y-8">
@@ -186,27 +194,49 @@ export default function Simulador() {
             <h2 className="vega-title text-lg text-vega-accent mb-6 uppercase border-b border-vega-primary pb-2">Rendimento Bruto do CDB</h2>
 
             <div className="grid gap-3 text-sm max-w-2xl mx-auto">
-              {[ 
-                ["Meses até o vencimento:", `${meses} meses`],
-                ["Dias úteis no período:", `${diasUteis} dias`],
-                ["Rendimento anual efetivo:", `${formatarValor(taxaEfetiva)}%`],
-                ["Rendimento bruto:", `R$ ${formatarValor(rendimentoBruto)}`],
-                ["Imposto de renda:", `R$ ${formatarValor(impostoRenda)}`],
-                ["Rendimento líquido:", `R$ ${formatarValor(rendimentoLiquido)}`],
-                ["Total final (principal + rendimento):", `R$ ${formatarValor(valor + rendimentoBruto)}`],
-              ].map(([label, val], idx) => (
-                <div className="flex justify-between" key={idx}>
-                  <span>{label}</span>
-                  <strong className={label.includes("Imposto") ? "text-orange-400" : "text-vega-accent"}>{val}</strong>
-                </div>
-              ))}
-            </div>
+			  {[
+				["Meses até o vencimento:", `${meses} meses`],
+				["Dias úteis no período:", `${diasUteis} dias`],
+				["Rendimento anual efetivo:", `${formatarValor(taxaEfetiva)}%`],
+				["Rendimento bruto:", `R$ ${formatarValor(rendimentoBruto)}`],
+				["Imposto de renda:", `R$ ${formatarValor(impostoRenda)}`],
+				["Rendimento líquido:", `R$ ${formatarValor(rendimentoLiquido)}`],
+				["Total final (principal + rendimento):", `R$ ${formatarValor(valor + rendimentoBruto)}`],
+			  ].map(([label, val], idx) => (
+				<div className="flex justify-between" key={idx}>
+				  <span>{label}</span>
+				  <strong className={label.includes("Imposto") ? "text-orange-400" : "text-vega-accent"}>{val}</strong>
+				</div>
+			  ))}
+
+			  {/* Separador visual */}
+			  <div className="border-t border-vega-primary my-2" />
+
+			  {[
+				["Taxa média do mercado:", `${formatarValor(taxaMediaMercado)}%`],
+				["Diferença para a média:", `${formatarValor(taxaEfetiva - taxaMediaMercado)}%`],
+			  ].map(([label, val], idx) => (
+				<div className="flex justify-between" key={`mercado-${idx}`}>
+				  <span>{label}</span>
+				  <strong className="text-vega-textSoft">{val}</strong>
+				</div>
+			  ))}
+			</div>
+
 
             <div className="mt-8 p-4 rounded-md border border-vega-primary">
-              <h2 className="vega-label text-vega-accent mb-1">Valor do serviço</h2>
-              <p className="text-sm text-center text-vega-text">R$ {formatarValor(valorServico)} ({formatarValor(taxaServico * 100)}%)</p>
-              <p className="text-xs text-center text-vega-textSoft mt-1">Taxa do serviço sobre o valor aplicado</p>
-            </div>
+			  <h2 className="vega-label text-vega-accent mb-1">Valor do serviço</h2>
+			  <div className="text-sm text-center text-vega-text space-y-1">
+				<p><strong>Plano mensal:</strong> R$ {formatarValor(mensalidadeFixa)}</p>
+				<p><strong>Taxa variável:</strong> R$ {formatarValor(taxaVariavel)}</p>
+				<hr className="my-2 border-vega-primary" />
+				<p><strong>Total:</strong> R$ {formatarValor(valorServico)}</p>
+			  </div>
+			  <p className="text-xs text-center text-vega-textSoft mt-2">
+				A taxa variável representa 20% da diferença positiva entre a taxa obtida pelo vega do Vega e a taxa média de mercado, ambas no momento da compra, aplicada sobre o valor investido.
+			  </p>
+			</div>
+
           </motion.div>
         )}
       </AnimatePresence>

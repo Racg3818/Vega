@@ -214,7 +214,7 @@ export default function Login() {
       <div className="relative z-20 flex justify-end items-center h-full w-full px-4">
         <div className="vega-card w-full max-w-md border border-zinc-800 backdrop-blur-sm bg-zinc-900/80 p-8 rounded-2xl shadow-2xl text-white">
           <div className="flex justify-center mb-6">
-            <img src="/images/logo-vega.png" alt="Logo Vega" className="h-12" />
+            <img src="/images/logo-vega.png" alt="Logo Vega" className="h-14" />
           </div>
 
           <h2 className="text-2xl font-semibold mb-6 text-center">

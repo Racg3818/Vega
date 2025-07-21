@@ -15,7 +15,7 @@
     @apply bg-vega-primary text-white px-4 py-2 rounded font-semibold hover:bg-vega-accent transition;
   }
   .vega-menu-item {
-    @apply flex items-center gap-2 p-2 rounded cursor-pointer text-vega-text hover:bg-vega-primary/20 transition;
+    @apply cursor-pointer text-vega-text hover:bg-vega-primary/10 transition;
   }
   .vega-menu-active {
     @apply text-vega-accent font-bold;

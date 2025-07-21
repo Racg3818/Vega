@@ -20,13 +20,16 @@ export default function Configuracoes() {
   const [assinatura, setAssinatura] = useState("");
   const [limiteCompra, setLimiteCompra] = useState(10000);
   const [ordem, setOrdem] = useState(["cdi", "ipca", "pre_fixado"]);
-  const [taxas, setTaxas] = useState({ cdi: 105, ipca: 7, pre_fixado: 13 });
+  const [taxas, setTaxas] = useState({ cdi: 120, ipca: 8, pre_fixado: 17 });
   const [selecionados, setSelecionados] = useState<any>({});
   const [status, setStatus] = useState<"idle" | "sucesso" | "erro">("idle");
   const [mostrarAssinatura, setMostrarAssinatura] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [temPagamento, setTemPagamento] = useState(false);
+  const [temFiltro, setTemFiltro] = useState(false);
+  const [temFatura, setTemFatura] = useState(false);
+
 
 
   const categorias = [
@@ -44,55 +47,51 @@ export default function Configuracoes() {
 	}, []);
 	
 	useEffect(() => {
-		  if (!user?.id) return;
+	  if (!user?.id) return;
 
-		  const carregarFiltros = async () => {
-			const { data, error } = await supabase
-			  .from("filtros")
-			  .select("*")
-			  .eq("user_id", user.id)
-			  .single();
+	  const carregarFiltros = async () => {
+		// Verifica filtros
+		const { data: filtrosData } = await supabase
+		  .from("filtros")
+		  .select("*")
+		  .eq("user_id", user.id)
+		  .maybeSingle();
 
-			if (error) {
-			  console.error("Erro ao carregar filtros:", error.message);
-			}
-
-			if (data) {
-			  setLimiteCompra(data.limite_compra || 10000);
-			  setOrdem(data.ordem_classe || ["cdi", "ipca", "pre_fixado"]);
-			  setTaxas(data.taxa_minima || { cdi: 105, ipca: 7, pre_fixado: 13 });
-			  setSelecionados(data.selecionados || {});
-
-			  if (data.assinatura && user?.id) {
-				try {
-				  const bytes = CryptoJS.AES.decrypt(data.assinatura, user.id);
-				  const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-				  console.log("👤 ID do usuário usado na descriptografia:", user.id);
-				  console.log("📦 Assinatura criptografada recebida:", data.assinatura);
-				  console.log("🔐 Assinatura descriptografada:", decrypted);
-				  if (decrypted) setAssinatura(decrypted);
-				} catch (e) {
-				  console.warn("Erro ao descriptografar assinatura salva.", e);
-				}
-			  }
-			}
-
+		if (filtrosData) {
+		  setTemFiltro(true);
+		  setLimiteCompra(filtrosData.limite_compra || 10000);
+		  setOrdem(filtrosData.ordem_classe || ["cdi", "ipca", "pre_fixado"]);
+		  setTaxas(filtrosData.taxa_minima || { cdi: 105, ipca: 7, pre_fixado: 13 });
+		  setSelecionados(filtrosData.selecionados || {});
+		  if (filtrosData.assinatura) {
 			try {
-			  const res = await fetch(`/api/verificarPagamento`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ user_id: user.id }),
-			  });
-
-			  const json = await res.json();
-			  setTemPagamento(json.temPagamento === true);
+			  const bytes = CryptoJS.AES.decrypt(filtrosData.assinatura, user.id);
+			  const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+			  if (decrypted) setAssinatura(decrypted);
 			} catch (e) {
-			  console.error("Erro ao verificar forma de pagamento:", e);
+			  console.warn("Erro ao descriptografar assinatura salva.", e);
 			}
-		  };
+		  }
+		}
 
-		  carregarFiltros();
-		}, [user?.id]);
+		// Verifica fatura ativa
+		const { data: faturasData } = await supabase
+		  .from("faturas")
+		  .select("id")
+		  .eq("user_id", user.id)
+		  .eq("status", "ativa") 
+		  .limit(1)
+		  .maybeSingle();
+
+		if (faturasData) setTemFatura(true);
+
+		if (faturasData) setTemFatura(true);
+		setTemPagamento(!!filtrosData && !!faturasData);
+	  };
+
+	  carregarFiltros();
+	}, [user?.id]);
+
 
 
 	useEffect(() => {
@@ -154,8 +153,13 @@ export default function Configuracoes() {
 		  setStatus("erro");
 		} else {
 		  setStatus("sucesso");
+		  setTemFiltro(true);
+		  if (temFatura) {
+		    setTemPagamento(true);
+		  }
+
 		  
-		  const urlXP = `https://experiencia.xpi.com.br/conta/#/`;
+		  const urlXP = `https://experiencia.xpi.com.br/conta-corrente/extrato/#/`;
 		  	  
 		  window.open(urlXP, "_blank");
 
@@ -324,9 +328,9 @@ export default function Configuracoes() {
           <div className="pt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
 			  <button
 				onClick={salvarFiltros}
-				disabled={!temPagamento}
+				disabled={!temFatura}
 				className={`px-4 py-2 rounded shadow text-black ${
-				  temPagamento
+				  temFatura
 					? "bg-vega-accent hover:bg-vega-primary"
 					: "bg-zinc-500 cursor-not-allowed"
 				}`}
@@ -334,11 +338,12 @@ export default function Configuracoes() {
 				Rodar Automação
 			  </button>
 
-			  {!temPagamento && (
-				<span className="text-yellow-400 text-sm mt-2">
-				  💳 Para rodar a automação, é necessário cadastrar uma forma de pagamento na aba Faturas.
-				</span>
-			  )}
+			  {!temFatura && (
+				  <span className="text-yellow-400 text-sm mt-2">
+					💳 Para rodar a automação, é necessário cadastrar uma forma de pagamento na aba Faturas.
+				  </span>
+				)}
+
 
 			  {status === "sucesso" && (
 				<span className="text-green-400 text-sm">✅ Filtros aplicados com sucesso</span>
@@ -346,14 +351,7 @@ export default function Configuracoes() {
 			  {status === "erro" && (
 				<span className="text-red-400 text-sm">❌ Erro ao aplicar os filtros</span>
 			  )}
-			</div>
-
-          {status === "sucesso" && (
-            <span className="text-green-400 text-sm">✅ Filtros aplicados com sucesso</span>
-          )}
-          {status === "erro" && (
-            <span className="text-red-400 text-sm">❌ Erro ao aplicar os filtros</span>
-          )}
+			</div>          
         </div>        
       </div>
     </div>

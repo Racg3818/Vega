@@ -68,57 +68,50 @@ const supabaseUrl = "https://rgkvzoeanbkbeqjbntdq.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJna3Z6b2VhbmJrYmVxamJudGRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA5MDczMjEsImV4cCI6MjA2NjQ4MzMyMX0.Qhy9GQOJD0wLSBmGLdS6QGxvERfST2FYqCDBo-F1njk";
 
 // ============ CAPTURA DE SALDO VIA TELA DE CONTA ============
-if (window.location.href.includes("https://experiencia.xpi.com.br/conta/#/")) {
+if (window.location.href.includes("https://experiencia.xpi.com.br/conta-corrente/extrato/#/")) {
   (async () => {
     console.log("🔎 Buscando saldo na tela da conta...");
 
     function esperarSaldo() {
-      return new Promise((resolve, reject) => {
-        const maxTentativas = 20;
-        let tentativas = 0;
+	  return new Promise((resolve, reject) => {
+		const maxTentativas = 20;
+		let tentativas = 0;
 
-        const intervalo = setInterval(() => {
-          const descricao = [...document.querySelectorAll("soma-description")]
-            .find(el => el.textContent?.trim() === "Saldo disponível");
+		const intervalo = setInterval(() => {
+		  const spans = [...document.querySelectorAll("span")];
 
-          if (!descricao) {
-            tentativas++;
-            if (tentativas >= maxTentativas) {
-              clearInterval(intervalo);
-              reject("❌ Descrição 'Saldo disponível' não encontrada.");
-            }
-            return;
-          }
+		  const alvo = spans.find(el =>
+			el.textContent?.trim().startsWith("R$") &&
+			el.getAttribute("style")?.includes("font-weight: 500")
+		  );
 
-          const container = descricao.closest("div");
-          const span = container?.querySelector("soma-paragraph span");
+		  if (!alvo) {
+			tentativas++;
+			if (tentativas >= maxTentativas) {
+			  clearInterval(intervalo);
+			  reject("❌ Span com saldo não encontrado.");
+			}
+			return;
+		  }
 
-          if (!span || !span.textContent?.includes("R$")) {
-            tentativas++;
-            if (tentativas >= maxTentativas) {
-              clearInterval(intervalo);
-              reject("❌ Span com valor em R$ não encontrado.");
-            }
-            return;
-          }
+		  const match = alvo.textContent.match(/R\$\s*([\d\.]+,\d{2})/);
+		  if (!match) {
+			tentativas++;
+			if (tentativas >= maxTentativas) {
+			  clearInterval(intervalo);
+			  reject("❌ Valor numérico de saldo não pôde ser extraído.");
+			}
+			return;
+		  }
 
-          const match = span.textContent.match(/R\$\s*([\d\.]+,\d{2})/);
-          if (!match) {
-            tentativas++;
-            if (tentativas >= maxTentativas) {
-              clearInterval(intervalo);
-              reject("❌ Valor numérico não pôde ser extraído.");
-            }
-            return;
-          }
+		  clearInterval(intervalo);
+		  const saldo = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+		  console.log("💰 Saldo identificado via span direto:", saldo);
+		  resolve(saldo);
+		}, 500);
+	  });
+	}
 
-          clearInterval(intervalo);
-          const saldo = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-          console.log("💰 Saldo disponível identificado:", saldo);
-          resolve(saldo);
-        }, 500);
-      });
-    }
 
     try {
       const saldoCapturado = await esperarSaldo();

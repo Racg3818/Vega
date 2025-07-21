@@ -2,14 +2,12 @@
   "name": "vega",
   "private": true,
   "version": "1.0.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
-  ],
-  "scripts": {
-    "dev:web": "pnpm --filter web dev",
-    "build:web": "pnpm --filter web build",
-    "dev:functions": "supabase functions serve --no-verify-jwt"
-  },
-  "devDependencies": {}
+  ]
 }

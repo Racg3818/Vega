@@ -80,26 +80,40 @@ export default function Dashboard() {
 
   const iconClass = (active: boolean) => `text-vega-primary transition-all duration-300 ${active ? "text-vega-accent" : ""}`;
 
-  const renderItem = (slug: string, Icon: any, label: string) => {
-    const active = telaAtiva === slug;
-    return (
-      <li
-        onClick={() => setTelaAtiva(slug)}
-        className={
-          menuAberto
-            ? `${itemClass(slug)} flex items-center gap-2 cursor-pointer` 
-            : `${itemClass(slug)} flex flex-col items-center justify-center cursor-pointer`
-        }
-      >
-        <Icon className={`${iconClass(active)} ${menuAberto ? "w-4 h-4" : "w-6 h-6"}`} />
-        <span
-          className={`text-vega-text ${menuAberto ? "text-sm" : "text-[12px] mt-1 leading-tight text-center"}`}
-        >
-          {label}
-        </span>
-      </li>
-    );
-  };
+  const renderItem = (
+	  slug: string,
+	  Icon: any,
+	  label: string,
+	  onClick?: () => void
+	) => {
+	  const active = telaAtiva === slug;
+	  return (
+		<li
+		  onClick={onClick ?? (() => setTelaAtiva(slug))}
+		  className={`
+			${itemClass(slug)} 
+			${menuAberto 
+			  ? "w-full justify-start flex-row px-3 py-2" 
+			  : "w-fit mx-auto flex-col items-center justify-center px-0 py-1"}
+			flex gap-1 cursor-pointer transition-all duration-300 rounded
+		  `}
+		>
+		  <Icon className="text-lg text-vega-primary" />
+		  <span
+			  className={`
+				${menuAberto 
+				  ? "text-sm text-vega-text" 
+				  : "text-[10px] leading-tight text-center w-12 break-words mt-1"}
+			  `}
+			>
+			  {label}
+			</span>
+
+		</li>
+
+	  );
+	};
+
 
   return (
 	  <ProtectedLayout>
@@ -108,7 +122,7 @@ export default function Dashboard() {
 			{/* Sidebar */}
 			<aside
 			  className={`${
-				menuAberto ? "w-54" : "w-20"
+				menuAberto ? "w-60" : "w-22"
 			  } transition-[width] duration-500 ease-in-out bg-vega-surface p-2 flex flex-col border-r border-vega-primary shadow-xl overflow-hidden relative`}
 			>
 
@@ -122,79 +136,79 @@ export default function Dashboard() {
 
 			  {/* Logo no topo */}
 			  <div
-				  className="flex justify-center mt-8 items-center cursor-pointer"
+				  className="flex justify-center mt-10 mb-10 items-center cursor-pointer"
 				  onClick={() => setTelaAtiva("graficos")}
 				>
 				  <img
 					  src={menuAberto ? "/images/logo-vega.png" : "/images/logo-vega-simbolo.png"}
 					  alt="Logo Vega"
 					  className={`transition-all duration-500 ease-in-out ${
-						menuAberto ? "h-20" : "h-20"
+						menuAberto ? "h-10" : "h-10"
 					  }`}
 					  />
 
 				</div>
 
-
 			  <div className="flex flex-col gap-8">
 				{/* Perfil */}
-				<div
-				  className={`flex items-center gap-4 transition-all duration-200 ${
-					menuAberto ? "opacity-100" : "opacity-0 h-0 overflow-hidden"
-				  }`}
-				>
-				  <div className="w-12 h-12 rounded-full bg-vega-accent text-white flex items-center justify-center text-lg font-bold uppercase border-2 border-vega-accent">
-					  {usuario?.user_metadata?.name
-						?.split(" ")
-						.slice(0, 2)
-						.map((n) => n[0])
-						.join("")}
-					</div>
-
-				  <div>
-					<p className="text-sm text-vega-text font-semibold">Olá,</p>
-					<p className="text-md text-vega-accent font-bold">{usuario?.user_metadata?.name}</p>
+				<div className="flex items-center justify-center mb-4">
+				  <div
+					className={`rounded-full text-white flex items-center justify-center font-bold uppercase border-2 border-vega-accent transition-all duration-300
+					  ${menuAberto ? "w-12 h-12 bg-vega-accent text-lg" : "w-10 h-10 bg-vega-primary text-sm"}`}
+				  >
+					{usuario?.user_metadata?.name
+					  ?.split(" ")
+					  .slice(0, 2)
+					  .map((n) => n[0])
+					  .join("")}
 				  </div>
+
+				  {menuAberto && (
+					<div className="ml-3 transition-opacity duration-300">
+					  <p className="text-sm text-vega-text font-semibold">Olá,</p>
+					  <p className="text-md text-vega-accent font-bold">
+						{usuario?.user_metadata?.name}
+					  </p>
+					</div>
+				  )}
 				</div>
 
+
 				{/* Menu Navegação */}
-				<nav className="space-y-8 text-sm">
-				  <div>
-					{menuAberto && (
-					  <h3 className="uppercase text-vega-primary text-xs font-semibold mb-3 tracking-wider">
-						Investimentos
-					  </h3>
-					)}
-					<ul className="space-y-2">
-					  {renderItem("investimentos", Banknote, "Investimentos")}
-					  {renderItem("posicoes", FaUniversity, "Posições")}
-					  {renderItem("simulador", SiSimpleanalytics, "Simulador")}
-					  {renderItem("indicacoes", FaTags, "Indicações")}
-					  {renderItem("faturas", FaReceipt, "Faturas")}
-					</ul>
-				  </div>
-				  <div>
-					{menuAberto && (
-					  <h3 className="uppercase text-vega-primary text-xs font-semibold mb-3 tracking-wider">
-						Conta
-					  </h3>
-					)}
-					<ul className="space-y-2">
-					  {renderItem("configuracoes", FaCogs, "Configurações")}
-					  {renderItem("duvidas", FaQuestionCircle, "Dúvidas")}
-					  <li
-						  onClick={async () => {
+				<div className={`px-4 transition-all duration-300 ${menuAberto ? "py-2" : "py-1"}`}>
+					<nav className={`text-sm ${menuAberto ? "space-y-6" : "space-y-2"}`}>
+					  <div>
+						{menuAberto && (
+						  <h3 className="uppercase text-vega-primary text-xs font-semibold mb-3 tracking-wider">
+							Investimentos
+						  </h3>
+						)}
+						<ul className={`transition-all duration-300 ${menuAberto ? "space-y-2" : "space-y-1"}`}>
+
+						  {renderItem("investimentos", Banknote, menuAberto ? "Investimentos": "Invest.")}
+						  {renderItem("posicoes", FaUniversity, "Posições")}
+						  {renderItem("simulador", SiSimpleanalytics, "Simulador")}
+						  {renderItem("indicacoes", FaTags, "Indicações")}
+						  {renderItem("faturas", FaReceipt, "Faturas")}
+						</ul>
+					  </div>
+					  <div>
+						{menuAberto && (
+						  <h3 className="uppercase text-vega-primary text-xs font-semibold mb-3 tracking-wider">
+							Conta
+						  </h3>
+						)}
+						<ul className={`transition-all duration-300 ${menuAberto ? "space-y-2" : "space-y-1"}`}>
+						  {renderItem("configuracoes", FaCogs, menuAberto ? "Configurações" : "Config.")}
+						  {renderItem("duvidas", FaQuestionCircle, "Dúvidas")}
+						  {renderItem("sair", FaSignOutAlt, "Sair", async () => {
 							await supabase.auth.signOut();
 							window.location.href = "/login";
-						  }}
-						  className={`${itemClass("sair")} flex items-center gap-2 cursor-pointer`}
-						>
-						  <FaSignOutAlt className={iconClass(false)} />
-						  <span className="text-vega-text text-sm">Sair</span>
-						</li>
-					</ul>
-				  </div>
-				</nav>
+						  })}
+						</ul>
+					  </div>
+					</nav>
+				</div>
 			  </div>
 			</aside>
 
