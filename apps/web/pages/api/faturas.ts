@@ -16,16 +16,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const clientes = await stripe.customers.list({ limit: 10 });
     const cliente = clientes.data.find(c => c.metadata?.user_id === user_id);
 
-    if (!cliente) return res.status(404).json({ error: "Cliente não encontrado" });
+    if (!cliente) return res.status(200).json({ faturas: [] });
 
-    const portal = await stripe.billingPortal.sessions.create({
-      customer: cliente.id,
-      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`,
-    });
+    const invoices = await stripe.invoices.list({ customer: cliente.id, limit: 10 });
 
-    return res.status(200).json({ url: portal.url });
+    return res.status(200).json({ faturas: invoices.data });
   } catch (err) {
-    console.error("❌ Erro ao criar sessão do portal:", err);
-    return res.status(500).json({ error: "Erro ao abrir portal do cliente Stripe" });
+    console.error("❌ Erro ao buscar faturas:", err);
+    return res.status(500).json({ error: "Erro ao listar faturas Stripe" });
   }
 }

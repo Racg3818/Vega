@@ -933,7 +933,8 @@ async function aplicarFiltrosXP(supabase) {
 
 
 				await new Promise(r => setTimeout(r, 1000));
-				break; // só realiza uma compra por classe	
+				await esperarElemento("soma-table-body soma-table-row", 10000, false);
+				//break; Comentado no dia 21/07
 			}
 		}
 	}

@@ -2,6 +2,8 @@ import { Banknote } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { SiSimpleanalytics } from "react-icons/si";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
+
 
 import ProtectedLayout from "@/components/ProtectedLayout";
 import Layout from "@/components/Layout";
@@ -23,10 +25,13 @@ import {
 
 export default function Dashboard() {
   
-  const [telaAtiva, setTelaAtiva] = useState("graficos");
   const [menuAberto, setMenuAberto] = useState(true);
   const [usuario, setUsuario] = useState<any>(null);
   const { dados, loading } = useDadosTaxasComparadas(usuario?.id);
+  const router = useRouter();
+  const abaURL = router.query.aba as string;
+  const [telaAtiva, setTelaAtiva] = useState(abaURL || "graficos");
+
   
   
   useEffect(() => {
@@ -75,6 +80,20 @@ export default function Dashboard() {
 	  };
 	}, []);
 
+  useEffect(() => {
+	  const { fromStripe, aba } = router.query;
+
+	  if (fromStripe === "1" || aba === "faturas") {
+		setTelaAtiva("faturas");
+
+		if (fromStripe === "1") {
+		  router.replace("/dashboard?aba=faturas", undefined, { shallow: true });
+		}
+	  }
+	}, [router.query]);
+
+
+  
   const itemClass = (slug: string) =>
     `vega-menu-item transition-all duration-300 ease-in-out transform hover:scale-105 ${telaAtiva === slug ? "vega-menu-active" : ""}`;
 
@@ -89,7 +108,12 @@ export default function Dashboard() {
 	  const active = telaAtiva === slug;
 	  return (
 		<li
-		  onClick={onClick ?? (() => setTelaAtiva(slug))}
+		  onClick={onClick || (() => {
+			  setTelaAtiva(slug);
+			  router.push(`/dashboard?aba=${slug}`, undefined, { shallow: true });
+			})}
+
+
 		  className={`
 			${itemClass(slug)} 
 			${menuAberto 

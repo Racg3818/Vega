@@ -31,7 +31,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     event = stripe.webhooks.constructEvent(buf, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-    //console.log("✅ Webhook recebido:", event.type);
+    console.log("✅ Webhook recebido:", event.type);
   } catch (err: any) {
     console.error("❌ Erro ao verificar assinatura do webhook:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -41,14 +41,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     switch (event.type) {
 		
       case "checkout.session.completed": {
-        //console.log("📦 Evento: checkout.session.completed");
+        console.log("📦 Evento: checkout.session.completed");
         const session = event.data.object as Stripe.Checkout.Session;
-		console.log("Session:", session)
+        console.log("Session:", session);
 
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
 
-        //console.log("🧾 Dados da sessão:", { customerId, subscriptionId });
+        console.log("🧾 Dados da sessão:", { customerId, subscriptionId });
 
         const customer = await stripe.customers.retrieve(customerId);
         if (!customer || typeof customer === "string") {
@@ -57,37 +57,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         const user_id = (customer.metadata as any)?.user_id;
-        //console.log("👤 Metadata do cliente:", customer.metadata);
+        console.log("👤 user_id do cliente:", user_id);
 
         if (!user_id) {
           console.error("❌ user_id ausente no metadata do cliente Stripe");
           return res.status(200).json({ error: "user_id ausente" });
         }
 
-        //console.log("✅ Sessão concluída - user_id:", user_id);
-
+        // Buscar fatura existente
         const { data: existente, error: erroBusca } = await supabase
           .from("faturas")
           .select("*")
           .eq("user_id", user_id)
-          .single();
+          .maybeSingle();
 
         if (erroBusca) {
           console.error("❌ Erro ao buscar fatura existente:", erroBusca);
         }
 
+        // Buscar dados da assinatura para obter a próxima data de cobrança
+        let proximaFatura = null;
+        if (subscriptionId) {
+          try {
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            proximaFatura = new Date(subscription.current_period_end * 1000).toISOString();
+            console.log("📅 Próxima fatura calculada:", proximaFatura);
+          } catch (err) {
+            console.error("❌ Erro ao buscar assinatura:", err);
+          }
+        }
+
         if (!existente) {
-          //console.log("🆕 Inserindo nova fatura no Supabase...");
+          console.log("🆕 Inserindo nova fatura no Supabase...");
           const { error } = await supabase.from("faturas").insert([
             {
               user_id,
               stripe_customer_id: customerId,
-			  stripe_checkout_session_id: session.id,
+              stripe_checkout_session_id: session.id,
               stripe_subscription_id: subscriptionId,
               plano: "mensal",
               status: "ativa",
               data_criacao: new Date().toISOString(),
-              //proxima_fatura: null, // será atualizada no subscription.updated
+              proxima_fatura: proximaFatura,
             },
           ]);
 
@@ -101,8 +112,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const { error } = await supabase
             .from("faturas")
             .update({
+              stripe_customer_id: customerId, // Garantir que seja salvo
+              stripe_subscription_id: subscriptionId,
               status: "ativa",
-              stripe_subscription_id: subscriptionId,			  			  
+              proxima_fatura: proximaFatura,
             })
             .eq("user_id", user_id);
 
@@ -117,83 +130,167 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       case "customer.subscription.updated": {
-			console.log("🔄 Evento: customer.subscription.updated");
+        console.log("🔄 Evento: customer.subscription.updated");
 
-			const subscription = event.data.object as Stripe.Subscription;
-			const customerId = subscription.customer as string;
-			
-			// Recuperar a assinatura com o latest_invoice expandido
-			const fullSubscription = await stripe.subscriptions.retrieve(subscription.id, {
-				expand: ['latest_invoice'],
-			});		
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
 
-			console.log("Full Subs:", fullSubscription)
+        console.log("Subscription data:", {
+          id: subscription.id,
+          status: subscription.status,
+          current_period_end: subscription.current_period_end,
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          canceled_at: subscription.canceled_at
+        });
 
-			let nextInvoiceDate: string | null = null;
+        let nextInvoiceDate: string | null = null;
+        let status = 'ativa';
+        let canceladaEm: string | null = null;
 
-			if (fullSubscription.status === 'active' && fullSubscription.latest_invoice && typeof fullSubscription.latest_invoice !== 'string') {
-				// Usar period_end da última fatura como a próxima data de cobrança
-				nextInvoiceDate = new Date(fullSubscription?.current_period_end * 1000).toISOString();
-			} else if (fullSubscription.status !== 'active') {
-				// Se a assinatura não estiver ativa, não há próxima fatura
-				nextInvoiceDate = null;
-			}			
+        if (subscription.status === 'active' && !subscription.cancel_at_period_end) {
+          // Assinatura ativa normal
+          nextInvoiceDate = new Date(subscription.current_period_end * 1000).toISOString();
+          status = 'ativa';
+          console.log("📅 Próxima fatura definida para:", nextInvoiceDate);
+        } else if (subscription.cancel_at_period_end && subscription.status === 'active') {
+          // Assinatura cancelada mas ainda ativa até o fim do período
+          nextInvoiceDate = null; // Não haverá próxima cobrança
+          status = 'cancelada_fim_periodo';
+          canceladaEm = new Date().toISOString();
+          console.log("🚫 Assinatura cancelada no fim do período atual");
+        } else if (subscription.status === 'canceled') {
+          // Assinatura completamente cancelada
+          nextInvoiceDate = null;
+          status = 'cancelada';
+          canceladaEm = subscription.canceled_at 
+            ? new Date(subscription.canceled_at * 1000).toISOString()
+            : new Date().toISOString();
+          console.log("❌ Assinatura completamente cancelada");
+        } else {
+          // Outros status (incomplete, past_due, etc)
+          nextInvoiceDate = null;
+          status = subscription.status;
+          console.log(`⚠️ Status da assinatura: ${subscription.status}`);
+        }
 
-			const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
-			const user_id = customer.metadata?.user_id;
+        const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+        const user_id = customer.metadata?.user_id;
 
-			if (!user_id) {
-				console.warn("⚠️ user_id ausente no metadata para subscription.updated. Não foi possível atualizar a fatura.");
-				break;
-			}
+        if (!user_id) {
+          console.warn("⚠️ user_id ausente no metadata para subscription.updated");
+          break;
+        }
 
-			const { data, error, count } = await supabase
-				.from("faturas")
-				.update({ proxima_fatura: nextInvoiceDate })
-				.eq("user_id", user_id)
-				.select('*', { count: 'exact' });
+        const updateData: any = { 
+          proxima_fatura: nextInvoiceDate,
+          status: status
+        };
 
-			if (error) {
-				console.error("❌ Erro ao atualizar próxima fatura:", error);
-			} else if (count === 0) {
-				console.warn(`⚠️ Nenhuma linha encontrada para user_id = ${user_id}.`);
-			} else {
-				//console.log(`✅ Próxima fatura atualizada com sucesso:`, data);
-			}
+        // Só atualizar cancelada_em se realmente foi cancelada
+        if (canceladaEm) {
+          updateData.cancelada_em = canceladaEm;
+        }
 
-			break;
-		}
+        const { data, error, count } = await supabase
+          .from("faturas")
+          .update(updateData)
+          .eq("user_id", user_id)
+          .select('*', { count: 'exact' });
 
-	  case "invoice.paid": {
-        
-		  const invoice = event.data.object as Stripe.Invoice;
-		  const subscriptionId = invoice.subscription as string;
+        if (error) {
+          console.error("❌ Erro ao atualizar próxima fatura:", error);
+        } else if (count === 0) {
+          console.warn(`⚠️ Nenhuma linha encontrada para user_id = ${user_id}`);
+        } else {
+          console.log(`✅ Assinatura atualizada com sucesso para user_id ${user_id}:`, {
+            status,
+            proxima_fatura: nextInvoiceDate,
+            cancelada_em: canceladaEm
+          });
+        }
 
-		  if (subscriptionId) {
-			const { error } = await supabase
-			  .from("faturas")
-			  .update({
-				proxima_fatura: invoice.next_payment_attempt
-				  ? new Date(invoice.next_payment_attempt * 1000).toISOString()
-				  : null,
-			  })
-			  .eq("stripe_subscription_id", subscriptionId);
+        break;
+      }
 
-			if (error) {
-			  console.error("Erro ao atualizar proxima_fatura:", error.message);
-			}
-		  }
-		
+      case "invoice.paid": {
+        console.log("💰 Evento: invoice.paid");
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = invoice.subscription as string;
+
+        if (subscriptionId) {
+          // Buscar a assinatura para obter o período atual
+          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+          const proximaFatura = new Date(subscription.current_period_end * 1000).toISOString();
+
+          const { error } = await supabase
+            .from("faturas")
+            .update({
+              proxima_fatura: proximaFatura,
+              status: 'ativa'
+            })
+            .eq("stripe_subscription_id", subscriptionId);
+
+          if (error) {
+            console.error("❌ Erro ao atualizar após pagamento:", error);
+          } else {
+            console.log("✅ Fatura atualizada após pagamento bem-sucedido");
+          }
+        }
 
         break;
       }
 
       case "invoice.payment_failed": {
         console.warn("⚠️ Pagamento da fatura falhou. ID do evento:", event.id);
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = invoice.subscription as string;
+
+        if (subscriptionId) {
+          const { error } = await supabase
+            .from("faturas")
+            .update({ status: 'pagamento_falhado' })
+            .eq("stripe_subscription_id", subscriptionId);
+
+          if (error) {
+            console.error("❌ Erro ao atualizar status após falha no pagamento:", error);
+          }
+        }
         break;
       }
-	}
-      
+
+      case "customer.subscription.deleted": {
+        console.log("🗑️ Evento: customer.subscription.deleted");
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
+
+        const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+        const user_id = customer.metadata?.user_id;
+
+        if (user_id) {
+          const { error } = await supabase
+            .from("faturas")
+            .update({ 
+              status: 'cancelada',
+              proxima_fatura: null,
+              cancelada_em: subscription.canceled_at 
+                ? new Date(subscription.canceled_at * 1000).toISOString()
+                : new Date().toISOString()
+            })
+            .eq("user_id", user_id);
+
+          if (error) {
+            console.error("❌ Erro ao atualizar status após cancelamento:", error);
+          } else {
+            console.log("✅ Assinatura marcada como cancelada com data");
+          }
+        }
+        break;
+      }
+
+      default:
+        console.log(`🤷 Evento não tratado: ${event.type}`);
+    }
+
     return res.status(200).json({ received: true });
   } catch (err: any) {
     console.error("❌ Erro interno no webhook:", {

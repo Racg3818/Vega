@@ -38,7 +38,12 @@ interface Props {
 export default function Graficos({ dados }: Props) {
   const classes = ["CDI", "IPCA", "PRE"];
   const [dataInicio, setDataInicio] = useState("");
-  const [dataFim, setDataFim] = useState("");
+  const [dataFim, setDataFim] = useState(() => new Date().toISOString().split("T")[0]);
+  const [visiveis, setVisiveis] = useState<Record<string, boolean>>({
+	  CDI: true,
+	  IPCA: true,
+	  PRE: true,
+	});
 
   if (dados.length === 0) {
     return <p className="text-white">Nenhum dado disponível para exibir gráficos.</p>;
@@ -122,8 +127,26 @@ export default function Graficos({ dados }: Props) {
           />
         </div>
       </div>
+	  
+	  <div className="flex gap-2 text-white">
+		  {classes.map((classe) => (
+			<button
+			  key={classe}
+			  onClick={() =>
+				setVisiveis((prev) => ({ ...prev, [classe]: !prev[classe] }))
+			  }
+			  className={`px-3 py-1 rounded ${
+				visiveis[classe] ? "bg-green-600" : "bg-gray-600"
+			  }`}
+			>
+			  {visiveis[classe] ? `Ocultar ${classe}` : `Mostrar ${classe}`}
+			</button>
+		  ))}
+		</div>
 
-      {classes.map((classe) => {
+
+      {classes.filter((classe) => visiveis[classe]).map((classe) => {
+
         const porClasse = dadosFiltrados.filter((d) => d.indexador === classe);
         const dadosIsento = porClasse.filter((d) => d.isento === true);
         const dadosNaoIsento = porClasse.filter((d) => d.isento === false);
