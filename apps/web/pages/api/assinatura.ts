@@ -1,3 +1,4 @@
+// ✅ NOVO: assinatura.ts - SEM SINCRONIZAÇÃO, APENAS CRUD
 import { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
@@ -13,255 +14,251 @@ const supabase = createClient(
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { method } = req;
-  
-  // Para GET, pegamos user_id da query string, para POST do body
   const user_id = method === "GET" ? req.query.user_id as string : req.body?.user_id;
   const { email, nome } = req.body || {};
 
-  if (!user_id) return res.status(400).json({ error: "user_id é obrigatório" });
-  if (method === "POST" && !email) return res.status(400).json({ error: "user_id e email são obrigatórios" });
+  if (!user_id) {
+    return res.status(400).json({ error: "user_id é obrigatório" });
+  }
 
   try {
-    const { data: existente } = await supabase
-      .from("faturas")
-      .select("*")
-      .eq("user_id", user_id)
-      .maybeSingle();
-
-    let stripeCustomerId = existente?.stripe_customer_id;
-
-    // Buscar ou criar cliente no Stripe (apenas para POST)
-    if (method === "POST" && !stripeCustomerId) {
-      const clientes = await stripe.customers.list({ email, limit: 10 });
-      let cliente = clientes.data.find((c) => c.metadata?.user_id === user_id);
-
-      if (!cliente) {
-        if (clientes.data.length > 0) {
-          cliente = await stripe.customers.update(clientes.data[0].id, {
-            metadata: { user_id },
-            name: nome,
-          });
-        } else {
-          cliente = await stripe.customers.create({
-            name: nome,
-            email,
-            metadata: { user_id },
-          });
-        }
-      }
-
-      stripeCustomerId = cliente.id;
-
-      if (existente) {
-        await supabase
-          .from("faturas")
-          .update({ stripe_customer_id: stripeCustomerId })
-          .eq("user_id", user_id);
-      }
-    }
-
+    
+    // ✅ POST - Criar/Reativar assinatura (SEM SINCRONIZAÇÃO)
     if (method === "POST") {
-      const subscriptions = await stripe.subscriptions.list({
-        customer: stripeCustomerId,
-        limit: 3,
-      });
+		  if (!email) {
+			return res.status(400).json({ error: "email é obrigatório" });
+		  }
 
-      // Buscar assinatura ativa ou cancelada que ainda está no período
-      const assinatura = subscriptions.data.find(sub =>
-        ["active", "incomplete"].includes(sub.status) || 
-        (sub.status === "canceled" && sub.current_period_end * 1000 > Date.now())
-      );
+		  // ✅ Buscar customer existente com melhor tratamento
+		  let stripeCustomerId: string;
+		  
+		  const { data: faturaExistente } = await supabase
+			.from("faturas")
+			.select("stripe_customer_id, stripe_subscription_id")
+			.eq("user_id", user_id)
+			.eq("tipo_fatura", "mensal")
+			.maybeSingle();
 
-      // Se existe assinatura ativa cancelada, reativar
-      if (assinatura?.cancel_at_period_end) {
-        await stripe.subscriptions.update(assinatura.id, { cancel_at_period_end: false });
-        
-        // Atualizar status no Supabase
-        await supabase
-          .from("faturas")
-          .update({ 
-            status: "ativa",
-            cancelada_em: null,
-            proxima_fatura: new Date(assinatura.current_period_end * 1000).toISOString()
-          })
-          .eq("user_id", user_id);
+		  if (faturaExistente?.stripe_customer_id) {
+			stripeCustomerId = faturaExistente.stripe_customer_id;
+			
+			// ✅ Verificar se o customer ainda existe no Stripe
+			try {
+			  const customer = await stripe.customers.retrieve(stripeCustomerId);
+			  if (customer.deleted) {
+				console.warn("⚠️ Customer foi deletado no Stripe, criando novo");
+				throw new Error("Customer deletado");
+			  }
+			} catch (err) {
+			  console.warn("⚠️ Erro ao verificar customer, criando novo:", err);
+			  stripeCustomerId = ''; // Força criação de novo customer
+			}
+		  }
 
-        return res.status(200).json({ session_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas` });
-      }
+		  // ✅ Criar customer se necessário
+		  if (!stripeCustomerId) {
+			try {
+			  const clientes = await stripe.customers.list({ email, limit: 1 });
+			  
+			  if (clientes.data.length > 0) {
+				const cliente = await stripe.customers.update(clientes.data[0].id, {
+				  metadata: { user_id },
+				  name: nome,
+				});
+				stripeCustomerId = cliente.id;
+			  } else {
+				const cliente = await stripe.customers.create({
+				  name: nome,
+				  email,
+				  metadata: { user_id },
+				});
+				stripeCustomerId = cliente.id;
+			  }
+			} catch (err) {
+			  console.error("❌ Erro ao criar/atualizar customer:", err);
+			  return res.status(500).json({ 
+				error: "Erro ao criar customer no Stripe",
+				details: err instanceof Error ? err.message : "Erro desconhecido"
+			  });
+			}
+		  }
 
-      const session = await stripe.checkout.sessions.create({
-        mode: "subscription",
-        payment_method_types: ["card"],
-        customer: stripeCustomerId,
-        line_items: [
-          {
-            price: "price_1RjtuPEKq04CUdXtKrYokfZ6",
-            quantity: 1,
-          },
-        ],
-        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas`,
-        metadata: {
-          user_id: user_id,
-        },
-      });
+		  // ✅ Verificar assinaturas com tratamento de erro melhor
+		  try {
+			const subscriptions = await stripe.subscriptions.list({
+			  customer: stripeCustomerId,
+			  limit: 10, // ✅ Buscar mais para ter certeza
+			  status: 'all' // ✅ Incluir todas para análise completa
+			});
 
-      if (!session?.url) {
-        return res.status(500).json({ error: "Falha ao criar sessão Stripe" });
-      }
+			console.log("🔍 Subscriptions encontradas:", subscriptions.data.map(s => ({
+			  id: s.id,
+			  status: s.status,
+			  cancel_at_period_end: s.cancel_at_period_end,
+			  current_period_end: s.current_period_end
+			})));
 
-      if (!existente) {
-        const { error } = await supabase.from("faturas").insert([
-          {
-            user_id,
-            stripe_customer_id: stripeCustomerId,
-            stripe_checkout_session_id: session.id,
-            stripe_subscription_id: "",
-            plano: "mensal",
-            status: "incompleto",
-            data_criacao: new Date().toISOString(),
-            proxima_fatura: null,
-            cancelada_em: null,
-          },
-        ]);
+			const assinatura = subscriptions.data.find(sub =>
+			  ["active", "incomplete", "trialing"].includes(sub.status) || 
+			  (sub.status === "canceled" && sub.current_period_end * 1000 > Date.now())
+			);
 
-        if (error) {
-          console.error("❌ Erro ao inserir fatura:", error);
-        }
-      } else {
-        const { error } = await supabase
-          .from("faturas")
-          .update({
-            stripe_customer_id: stripeCustomerId,
-            stripe_checkout_session_id: session.id,
-            status: "incompleto",
-          })
-          .eq("user_id", user_id);
+			// ✅ Reativar se cancelada mas ainda no período
+			if (assinatura?.cancel_at_period_end && assinatura.status === 'active') {
+			  await stripe.subscriptions.update(assinatura.id, { 
+				cancel_at_period_end: false 
+			  });
+			  
+			  return res.status(200).json({ 
+				message: "Assinatura reativada com sucesso",
+				session_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas&reativada=true` 
+			  });
+			}
 
-        if (error) {
-          console.error("❌ Erro ao atualizar fatura:", error);
-        }
-      }
+			// ✅ Se já ativa, redirecionar com mais informações
+			if (assinatura && ["active", "incomplete", "trialing"].includes(assinatura.status)) {
+			  return res.status(200).json({ 
+				message: `Assinatura já ${assinatura.status === 'active' ? 'ativa' : assinatura.status}`,
+				session_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas&status=${assinatura.status}` 
+			  });
+			}
 
-      return res.status(200).json({ session_url: session.url });
-    }
+			// ✅ Criar checkout session com mais configurações
+			const session = await stripe.checkout.sessions.create({
+			  mode: "subscription",
+			  payment_method_types: ["card"],
+			  customer: stripeCustomerId,
+			  line_items: [{ price: "price_1RjtuPEKq04CUdXtKrYokfZ6", quantity: 1 }],
+			  success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas&success=true`,
+			  cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas&canceled=true`,
+			  metadata: { user_id },
+			  allow_promotion_codes: true, // ✅ Permitir códigos promocionais
+			  billing_address_collection: 'auto', // ✅ Coletar endereço se necessário
+			});
 
-    if (method === "GET") {
-      if (!stripeCustomerId) {
-        console.log("❌ GET: stripe_customer_id não encontrado para user_id:", user_id);
-        return res.status(200).json({ permitido: false, motivo: "cliente_nao_encontrado" });
-      }
+			return res.status(200).json({ session_url: session.url });
 
-      console.log("🔍 GET: Verificando permissões para customer:", stripeCustomerId);
-
-      const subscriptions = await stripe.subscriptions.list({
-        customer: stripeCustomerId,
-        limit: 5,
-        expand: ["data.default_payment_method"]
-      });
-
-      console.log("📋 GET: Assinaturas encontradas:", subscriptions.data.map(s => ({
-        id: s.id,
-        status: s.status,
-        cancel_at_period_end: s.cancel_at_period_end,
-        current_period_end: s.current_period_end,
-        has_payment_method: !!s.default_payment_method
-      })));
-
-      // Verificar assinatura ativa
-      const assinatura = subscriptions.data.find(sub =>
-        ["active", "incomplete"].includes(sub.status)
-      );
-
-      if (!assinatura) {
-        // Verificar se há assinatura cancelada mas ainda no período ativo
-        const assinaturaCancelada = subscriptions.data.find(sub =>
-          sub.status === "canceled" && sub.current_period_end * 1000 > Date.now()
-        );
-        
-        console.log("🔍 GET: Assinatura cancelada mas ainda ativa?", !!assinaturaCancelada);
-        
-        if (assinaturaCancelada) {
-          return res.status(200).json({ 
-            permitido: true, 
-            cancelada: true,
-            expira_em: new Date(assinaturaCancelada.current_period_end * 1000).toISOString()
-          });
-        }
-        
-        console.log("❌ GET: Nenhuma assinatura ativa ou válida encontrada");
-        return res.status(200).json({ permitido: false, motivo: "assinatura_inativa" });
-      }
-
-      // Verificar se assinatura incompleta tem faturas pagas
-      if (assinatura.status === "incomplete") {
-        const faturas = await stripe.invoices.list({ customer: stripeCustomerId, limit: 5 });
-        const possuiFaturaPaga = faturas.data.some(f => f.status === "paid");
-        if (!possuiFaturaPaga) {
-          console.log("❌ GET: Assinatura incompleta sem faturas pagas");
-          return res.status(200).json({ permitido: false, motivo: "assinatura_inativa" });
-        }
-      }
-	  
-	  if (!assinatura.default_payment_method && assinatura.customer) {
-		  const cliente = await stripe.customers.retrieve(assinatura.customer as string) as Stripe.Customer;
-		  assinatura.default_payment_method = cliente.invoice_settings?.default_payment_method || cliente.default_source || null;
+		  } catch (err) {
+			console.error("❌ Erro ao processar subscriptions:", err);
+			return res.status(500).json({ 
+			  error: "Erro ao verificar assinaturas",
+			  details: err instanceof Error ? err.message : "Erro desconhecido"
+			});
+		  }
 		}
 
+    // ✅ GET - Consultar status (DIRETO DO BANCO)
+    if (method === "GET") {
+		  const { data: fatura, error } = await supabase
+			.from("faturas")
+			.select("*")
+			.eq("user_id", user_id)
+			.eq("tipo_fatura", "mensal")
+			.maybeSingle();
 
-      // Verificar método de pagamento válido
-      let metodo = assinatura.default_payment_method;
-      
-      // Se não há método expandido, buscar separadamente
-      if (!metodo && assinatura.default_payment_method) {
-        try {
-          metodo = await stripe.paymentMethods.retrieve(assinatura.default_payment_method as string);
-        } catch (err) {
-          console.log("❌ GET: Erro ao buscar método de pagamento:", err);
-          return res.status(200).json({ permitido: false, motivo: "cartao_removido" });
-        }
+		  if (error) {
+			console.error("❌ Erro ao buscar fatura:", error);
+			return res.status(500).json({ 
+			  error: "Erro ao consultar fatura",
+			  details: error.message 
+			});
+		  }
+
+		  if (!fatura) {
+			return res.status(200).json({ 
+			  permitido: false, 
+			  motivo: "fatura_nao_encontrada",
+			  status: null
+			});
+		  }
+
+		  // ✅ Verificar se assinatura ainda está válida no Stripe (opcional)
+		  let stripeStatus = null;
+		  if (fatura.stripe_subscription_id) {
+			try {
+			  const subscription = await stripe.subscriptions.retrieve(fatura.stripe_subscription_id);
+			  stripeStatus = subscription.status;
+			  
+			  // ✅ Se status no Stripe diferir do banco, logar para investigação
+			  if (subscription.status !== fatura.status && subscription.status === 'canceled') {
+				console.warn("⚠️ Inconsistência detectada:", {
+				  banco: fatura.status,
+				  stripe: subscription.status,
+				  subscription_id: fatura.stripe_subscription_id
+				});
+			  }
+			} catch (err) {
+			  console.warn("⚠️ Erro ao verificar status no Stripe:", err);
+			}
+		  }
+
+		  const permitido = ['ativa', 'cancelada_fim_periodo'].includes(fatura.status);
+
+		  return res.status(200).json({
+			permitido,
+			cancelada: fatura.status === 'cancelada_fim_periodo',
+			status: fatura.status,
+			stripe_status: stripeStatus, // ✅ Incluir status do Stripe para debug
+			expira_em: fatura.expiracao_em,
+			proxima_fatura: fatura.proxima_fatura,
+			problema_pagamento: fatura.problema_pagamento,
+			motivo_problema: fatura.motivo_problema,
+			valor: fatura.valor,
+			plano: fatura.plano
+		  });
+		}
+
+    // ✅ PUT - Portal do Stripe
+    if (method === "PUT") {
+      const { data: fatura } = await supabase
+        .from("faturas")
+        .select("stripe_customer_id")
+        .eq("user_id", user_id)
+        .eq("tipo_fatura", "mensal")
+        .maybeSingle();
+
+      if (!fatura?.stripe_customer_id) {
+        return res.status(400).json({ error: "Cliente não encontrado" });
       }
 
-      // Verificar se método de pagamento é válido
-      if (!metodo) {
-        console.log("❌ GET: Nenhum método de pagamento encontrado");
-        return res.status(200).json({ permitido: false, motivo: "cartao_removido" });
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: fatura.stripe_customer_id,
+        return_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?aba=faturas`,
+      });
+
+      return res.status(200).json({ url: portalSession.url });
+    }
+
+    // ✅ DELETE - Cancelar assinatura (SEM SINCRONIZAÇÃO)
+    if (method === "DELETE") {
+      const { data: fatura } = await supabase
+        .from("faturas")
+        .select("stripe_subscription_id")
+        .eq("user_id", user_id)
+        .eq("tipo_fatura", "mensal")
+        .maybeSingle();
+
+      if (!fatura?.stripe_subscription_id) {
+        return res.status(400).json({ error: "Assinatura não encontrada" });
       }
 
-      // Verificar se é cartão válido
-      if (typeof metodo === "object" && metodo.type === "card") {
-        const agora = new Date();
-        const mesAtual = agora.getMonth() + 1; // getMonth() retorna 0-11
-        const anoAtual = agora.getFullYear();
-        
-        if (!metodo.card?.exp_month || !metodo.card?.exp_year) {
-          console.log("❌ GET: Cartão sem data de expiração");
-          return res.status(200).json({ permitido: false, motivo: "cartao_removido" });
-        }
-        
-        // Verificar se cartão está expirado
-        if (metodo.card.exp_year < anoAtual || 
-           (metodo.card.exp_year === anoAtual && metodo.card.exp_month < mesAtual)) {
-          console.log("❌ GET: Cartão expirado");
-          return res.status(200).json({ permitido: false, motivo: "cartao_expirado" });
-        }
-      }
+      await stripe.subscriptions.update(fatura.stripe_subscription_id, {
+        cancel_at_period_end: true,
+      });
 
-      const resultado = { 
-        permitido: true,
-        cancelada: assinatura.cancel_at_period_end,
-        expira_em: assinatura.cancel_at_period_end 
-          ? new Date(assinatura.current_period_end * 1000).toISOString()
-          : null
-      };
-
-      console.log("✅ GET: Resultado final:", resultado);
-      return res.status(200).json(resultado);
+      return res.status(200).json({ 
+        sucesso: true,
+        message: "Assinatura cancelada ao fim do período"
+      });
     }
 
     return res.status(405).json({ error: "Método não suportado" });
+
   } catch (err) {
-    console.error("❌ Erro interno:", err);
-    return res.status(500).json({ error: "Erro no processamento Stripe" });
+    console.error("❌ Erro:", err);
+    return res.status(500).json({ 
+      error: "Erro interno",
+      details: err instanceof Error ? err.message : "Erro desconhecido"
+    });
   }
 }

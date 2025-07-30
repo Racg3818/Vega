@@ -1,9 +1,9 @@
+// ✅ VERSÃO FAIL-SAFE COM LOGS DETALHADOS
 import { buffer } from "micro";
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-// Desabilita body parser do Next.js
 export const config = {
   api: {
     bodyParser: false,
@@ -19,284 +19,384 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+async function sincronizarHistoricoFaturas(faturaId: string, subscriptionId: string) {
+  try {
+    console.log("📋 Sincronizando histórico para fatura:", faturaId);
+    
+    // Buscar invoices do Stripe
+    const invoices = await stripe.invoices.list({
+      subscription: subscriptionId,
+      limit: 10,
+      status: 'paid' // Apenas faturas pagas
+    });
+
+    for (const invoice of invoices.data) {
+      // Verificar se já existe no histórico
+      const { data: existente } = await supabase
+        .from("faturas_historico")
+        .select("id")
+        .eq("fatura_id", faturaId)
+        .eq("subscription_id", invoice.subscription)
+        .eq("data", new Date(invoice.created * 1000).toISOString())
+        .maybeSingle();
+
+      if (!existente) {
+        const { error } = await supabase
+          .from("faturas_historico")
+          .insert({
+            fatura_id: faturaId,
+            data: new Date(invoice.created * 1000).toISOString(),
+            valor: invoice.amount_paid || 0,
+            status: invoice.status || 'unknown',
+            pago: invoice.status === 'paid',
+            link_fatura: invoice.hosted_invoice_url,
+            subscription_id: invoice.subscription as string
+          });
+
+        if (error) {
+          console.error("❌ Erro ao inserir histórico:", error);
+        } else {
+          console.log("✅ Histórico inserido para invoice:", invoice.id);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("❌ Erro ao sincronizar histórico:", err);
+  }
+}
+
+async function upsertFatura(userId: string, subscription: Stripe.Subscription) {
+	  
+	  console.log("📦 Subscription recebida no upsert:", {
+	  id: subscription.id,
+	  status: subscription.status,
+	  cancel_at_period_end: subscription.cancel_at_period_end,
+	  current_period_end: subscription.current_period_end,
+	  canceled_at: subscription.canceled_at
+	});
+
+  
+  try {
+    const status = getStatusFromStripe(subscription);
+    const valor = await getSubscriptionValue(subscription);
+    
+    const dadosFatura = {
+      user_id: userId,
+      stripe_customer_id: subscription.customer as string,
+      stripe_subscription_id: subscription.id,
+      tipo_fatura: "mensal",
+      status,
+      plano: "mensal",
+      valor,
+      proxima_fatura: subscription.status === 'active' && !subscription.cancel_at_period_end && typeof subscription.current_period_end === 'number'
+		  ? new Date(subscription.current_period_end * 1000).toISOString()
+		  : null,
+      expiracao_em: (subscription.cancel_at_period_end || subscription.status === 'canceled') && typeof subscription.current_period_end === 'number'
+		  ? new Date(subscription.current_period_end * 1000).toISOString()
+		  : null,
+      cancelada_em: typeof subscription.canceled_at === 'number'
+		  ? new Date(subscription.canceled_at * 1000).toISOString()
+		  : null,
+      problema_pagamento: subscription.status === 'past_due',
+      motivo_problema: subscription.status === 'past_due' ? 'pagamento_falhado' : null,
+      criado_em: typeof subscription.created === 'number'
+		  ? new Date(subscription.created * 1000).toISOString()
+		  : null,
+
+    };
+
+    console.log("📝 Dados da fatura:", dadosFatura);
+
+    const { data: insertData, error: insertError  } = await supabase
+      .from("faturas")
+      .upsert(dadosFatura, { 
+        onConflict: 'user_id,tipo_fatura',
+        ignoreDuplicates: false 
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (!insertError  && insertData) {
+      console.log("✅ Upsert successful:", insertData);
+      
+      // ✅ SINCRONIZAR HISTÓRICO
+      await sincronizarHistoricoFaturas(insertData.id, subscription.id);
+      
+      return true;
+    }
+
+    console.warn("⚠️ Upsert falhou, tentando fallback:", insertError);
+
+    // ✅ FALLBACK com sincronização
+    const { data: faturaExistente } = await supabase
+      .from("faturas")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("tipo_fatura", "mensal")
+      .maybeSingle();
+
+    if (faturaExistente) {
+      const { error: updateError } = await supabase
+        .from("faturas")
+        .update(dadosFatura)
+        .eq("id", faturaExistente.id);
+
+      if (!updateError) {
+        await sincronizarHistoricoFaturas(faturaExistente.id, subscription.id);
+        console.log("✅ Update + histórico successful via fallback");
+      }
+    } else {
+      const { data: insertData, error: insertError } = await supabase
+        .from("faturas")
+        .insert(dadosFatura)
+        .select("id")
+        .single();
+
+      if (!insertError && insertData) {
+        await sincronizarHistoricoFaturas(insertData.id, subscription.id);
+        console.log("✅ Insert + histórico successful via fallback");
+      }
+    }
+
+    return true;
+
+  } catch (err) {
+    console.error("❌ Erro crítico no upsert:", err);
+    return false;
+  }
+}
+
+function getStatusFromStripe(subscription: Stripe.Subscription): string {
+  console.log("🔍 Determinando status para subscription:", {
+    status: subscription.status,
+    cancel_at_period_end: subscription.cancel_at_period_end,
+    current_period_end: subscription.current_period_end
+  });
+
+  if (subscription.status === 'active') {
+    return subscription.cancel_at_period_end ? 'cancelada_fim_periodo' : 'ativa';
+  }
+  if (subscription.status === 'canceled') {
+    return subscription.current_period_end * 1000 > Date.now() 
+      ? 'cancelada_fim_periodo' 
+      : 'cancelada';
+  }
+  if (subscription.status === 'past_due') return 'ativa';
+  if (subscription.status === 'incomplete') return 'incompleto';
+  return 'cancelada';
+}
+
+async function getSubscriptionValue(subscription: Stripe.Subscription): Promise<number> {
+  try {
+    if (subscription.items.data.length > 0) {
+      const priceId = subscription.items.data[0].price.id;
+      console.log("💰 Buscando preço para:", priceId);
+      
+      const price = await stripe.prices.retrieve(priceId);
+      const valor = price.unit_amount || 0;
+      console.log("💰 Valor encontrado:", valor);
+      return valor;
+    }
+  } catch (err) {
+    console.warn("⚠️ Erro ao buscar preço:", err);
+  }
+  return 0;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+	
+  console.log("🔔 Webhook Stripe recebido", req.method);
   if (req.method !== "POST") {
-    console.warn("❌ Método não permitido:", req.method);
     return res.status(405).end("Method Not Allowed");
   }
-
+  
   const buf = await buffer(req);
   const sig = req.headers["stripe-signature"]!;
   let event: Stripe.Event;
 
-  try {
+  try {	  
+
     event = stripe.webhooks.constructEvent(buf, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-    console.log("✅ Webhook recebido:", event.type);
+    console.log("✅ Webhook recebido:", event.type, "ID:", event.id);
   } catch (err: any) {
-    console.error("❌ Erro ao verificar assinatura do webhook:", err.message);
+    console.error("❌ Webhook signature error:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
-    switch (event.type) {
-		
-      case "checkout.session.completed": {
-        console.log("📦 Evento: checkout.session.completed");
-        const session = event.data.object as Stripe.Checkout.Session;
-        console.log("Session:", session);
+    async function getUserId(customerId: string): Promise<string | null> {
+	  try {
+		const customer = await stripe.customers.retrieve(customerId);
+		const metadata = (customer as Stripe.Customer).metadata;
 
+		console.log("📦 Metadata recebida do Stripe:", metadata);
+
+		return metadata?.user_id || null;
+	  } catch (erro) {
+		console.error("❌ Erro ao buscar user_id via Stripe:", erro);
+		return null;
+	  }
+	}
+
+    switch (event.type) {
+      
+      case "checkout.session.completed": {
+        console.log("🛒 Processando checkout.session.completed");
+        const session = event.data.object as Stripe.Checkout.Session;
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
 
-        console.log("🧾 Dados da sessão:", { customerId, subscriptionId });
+        console.log("🛒 Dados do checkout:", { customerId, subscriptionId });
 
-        const customer = await stripe.customers.retrieve(customerId);
-        if (!customer || typeof customer === "string") {
-          console.warn("⚠️ Cliente não encontrado ou inválido");
-          return res.status(200).json({ ok: true });
-        }
-
-        const user_id = (customer.metadata as any)?.user_id;
-        console.log("👤 user_id do cliente:", user_id);
-
-        if (!user_id) {
-          console.error("❌ user_id ausente no metadata do cliente Stripe");
-          return res.status(200).json({ error: "user_id ausente" });
-        }
-
-        // Buscar fatura existente
-        const { data: existente, error: erroBusca } = await supabase
-          .from("faturas")
-          .select("*")
-          .eq("user_id", user_id)
-          .maybeSingle();
-
-        if (erroBusca) {
-          console.error("❌ Erro ao buscar fatura existente:", erroBusca);
-        }
-
-        // Buscar dados da assinatura para obter a próxima data de cobrança
-        let proximaFatura = null;
-        if (subscriptionId) {
-          try {
-            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-            proximaFatura = new Date(subscription.current_period_end * 1000).toISOString();
-            console.log("📅 Próxima fatura calculada:", proximaFatura);
-          } catch (err) {
-            console.error("❌ Erro ao buscar assinatura:", err);
-          }
-        }
-
-        if (!existente) {
-          console.log("🆕 Inserindo nova fatura no Supabase...");
-          const { error } = await supabase.from("faturas").insert([
-            {
-              user_id,
-              stripe_customer_id: customerId,
-              stripe_checkout_session_id: session.id,
-              stripe_subscription_id: subscriptionId,
-              plano: "mensal",
-              status: "ativa",
-              data_criacao: new Date().toISOString(),
-              proxima_fatura: proximaFatura,
-            },
-          ]);
-
-          if (error) {
-            console.error("❌ Erro ao inserir nova fatura:", error);
-          } else {
-            console.log("✅ Fatura inserida com sucesso no Supabase");
-          }
-        } else {
-          console.log("✏️ Atualizando fatura existente para status 'ativa'");
-          const { error } = await supabase
-            .from("faturas")
-            .update({
-              stripe_customer_id: customerId, // Garantir que seja salvo
-              stripe_subscription_id: subscriptionId,
-              status: "ativa",
-              proxima_fatura: proximaFatura,
-            })
-            .eq("user_id", user_id);
-
-          if (error) {
-            console.error("❌ Erro ao atualizar fatura:", error);
-          } else {
-            console.log("✅ Fatura atualizada com sucesso");
-          }
-        }
-
-        break;
-      }
-
-      case "customer.subscription.updated": {
-        console.log("🔄 Evento: customer.subscription.updated");
-
-        const subscription = event.data.object as Stripe.Subscription;
-        const customerId = subscription.customer as string;
-
-        console.log("Subscription data:", {
-          id: subscription.id,
-          status: subscription.status,
-          current_period_end: subscription.current_period_end,
-          cancel_at_period_end: subscription.cancel_at_period_end,
-          canceled_at: subscription.canceled_at
-        });
-
-        let nextInvoiceDate: string | null = null;
-        let status = 'ativa';
-        let canceladaEm: string | null = null;
-
-        if (subscription.status === 'active' && !subscription.cancel_at_period_end) {
-          // Assinatura ativa normal
-          nextInvoiceDate = new Date(subscription.current_period_end * 1000).toISOString();
-          status = 'ativa';
-          console.log("📅 Próxima fatura definida para:", nextInvoiceDate);
-        } else if (subscription.cancel_at_period_end && subscription.status === 'active') {
-          // Assinatura cancelada mas ainda ativa até o fim do período
-          nextInvoiceDate = null; // Não haverá próxima cobrança
-          status = 'cancelada_fim_periodo';
-          canceladaEm = new Date().toISOString();
-          console.log("🚫 Assinatura cancelada no fim do período atual");
-        } else if (subscription.status === 'canceled') {
-          // Assinatura completamente cancelada
-          nextInvoiceDate = null;
-          status = 'cancelada';
-          canceladaEm = subscription.canceled_at 
-            ? new Date(subscription.canceled_at * 1000).toISOString()
-            : new Date().toISOString();
-          console.log("❌ Assinatura completamente cancelada");
-        } else {
-          // Outros status (incomplete, past_due, etc)
-          nextInvoiceDate = null;
-          status = subscription.status;
-          console.log(`⚠️ Status da assinatura: ${subscription.status}`);
-        }
-
-        const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
-        const user_id = customer.metadata?.user_id;
-
-        if (!user_id) {
-          console.warn("⚠️ user_id ausente no metadata para subscription.updated");
+        const userId = await getUserId(customerId);
+        if (!userId) {
+          console.warn("⚠️ UserID não encontrado, abortando");
           break;
         }
 
-        const updateData: any = { 
-          proxima_fatura: nextInvoiceDate,
-          status: status
-        };
-
-        // Só atualizar cancelada_em se realmente foi cancelada
-        if (canceladaEm) {
-          updateData.cancelada_em = canceladaEm;
-        }
-
-        const { data, error, count } = await supabase
-          .from("faturas")
-          .update(updateData)
-          .eq("user_id", user_id)
-          .select('*', { count: 'exact' });
-
-        if (error) {
-          console.error("❌ Erro ao atualizar próxima fatura:", error);
-        } else if (count === 0) {
-          console.warn(`⚠️ Nenhuma linha encontrada para user_id = ${user_id}`);
-        } else {
-          console.log(`✅ Assinatura atualizada com sucesso para user_id ${user_id}:`, {
-            status,
-            proxima_fatura: nextInvoiceDate,
-            cancelada_em: canceladaEm
+        try {
+          const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+            expand: ['items.data.price']
           });
-        }
-
-        break;
-      }
-
-      case "invoice.paid": {
-        console.log("💰 Evento: invoice.paid");
-        const invoice = event.data.object as Stripe.Invoice;
-        const subscriptionId = invoice.subscription as string;
-
-        if (subscriptionId) {
-          // Buscar a assinatura para obter o período atual
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          const proximaFatura = new Date(subscription.current_period_end * 1000).toISOString();
-
-          const { error } = await supabase
-            .from("faturas")
-            .update({
-              proxima_fatura: proximaFatura,
-              status: 'ativa'
-            })
-            .eq("stripe_subscription_id", subscriptionId);
-
-          if (error) {
-            console.error("❌ Erro ao atualizar após pagamento:", error);
+          console.log("📋 Subscription recuperada:", subscription.id);
+          
+          const success = await upsertFatura(userId, subscription);
+          if (success) {
+            console.log("✅ Checkout processado com sucesso");
           } else {
-            console.log("✅ Fatura atualizada após pagamento bem-sucedido");
+            console.error("❌ Falha ao processar checkout");
           }
+        } catch (err) {
+          console.error("❌ Erro ao buscar subscription:", err);
         }
-
         break;
       }
 
-      case "invoice.payment_failed": {
-        console.warn("⚠️ Pagamento da fatura falhou. ID do evento:", event.id);
-        const invoice = event.data.object as Stripe.Invoice;
-        const subscriptionId = invoice.subscription as string;
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        console.log(`🔄 Processando ${event.type}`);
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
 
-        if (subscriptionId) {
-          const { error } = await supabase
-            .from("faturas")
-            .update({ status: 'pagamento_falhado' })
-            .eq("stripe_subscription_id", subscriptionId);
+        const userId = await getUserId(customerId);
+        if (!userId) break;
 
-          if (error) {
-            console.error("❌ Erro ao atualizar status após falha no pagamento:", error);
-          }
-        }
+        const success = await upsertFatura(userId, subscription);
+        console.log(`✅ ${event.type} processado:`, success);
         break;
       }
 
       case "customer.subscription.deleted": {
-        console.log("🗑️ Evento: customer.subscription.deleted");
+        console.log("🗑️ Processando subscription.deleted");
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
-        const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
-        const user_id = customer.metadata?.user_id;
+        const userId = await getUserId(customerId);
+        if (!userId) break;
 
-        if (user_id) {
-          const { error } = await supabase
-            .from("faturas")
-            .update({ 
-              status: 'cancelada',
-              proxima_fatura: null,
-              cancelada_em: subscription.canceled_at 
-                ? new Date(subscription.canceled_at * 1000).toISOString()
-                : new Date().toISOString()
-            })
-            .eq("user_id", user_id);
+        const { error } = await supabase
+          .from("faturas")
+          .update({
+            status: 'cancelada',
+            proxima_fatura: null,
+            expiracao_em: null,
+            cancelada_em: new Date().toISOString(),
+            problema_pagamento: false,
+            motivo_problema: null
+          })
+          .eq("user_id", userId)
+          .eq("tipo_fatura", "mensal");
 
-          if (error) {
-            console.error("❌ Erro ao atualizar status após cancelamento:", error);
-          } else {
-            console.log("✅ Assinatura marcada como cancelada com data");
-          }
+        if (error) {
+          console.error("❌ Erro ao marcar como cancelada:", error);
+        } else {
+          console.log("✅ Subscription marcada como cancelada");
         }
         break;
       }
+
+      case "invoice.payment_failed": {
+        console.log("💳 Processando payment_failed");
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = invoice.customer as string;
+
+        const userId = await getUserId(customerId);
+        if (!userId) break;
+
+        const { error } = await supabase
+          .from("faturas")
+          .update({
+            problema_pagamento: true,
+            motivo_problema: 'pagamento_falhado'
+          })
+          .eq("user_id", userId)
+          .eq("tipo_fatura", "mensal");
+
+        if (error) {
+          console.error("❌ Erro ao marcar problema pagamento:", error);
+        } else {
+          console.log("✅ Problema de pagamento registrado");
+        }
+        break;
+      }
+
+      case "invoice.payment_succeeded": {
+		  console.log("💰 Processando invoice.payment_succeeded");
+		  const invoice = event.data.object as Stripe.Invoice;
+		  const customerId = invoice.customer as string;
+		  const subscriptionId = invoice.subscription as string;
+
+		  const userId = await getUserId(customerId);
+		  if (!userId || !subscriptionId) break;
+
+		  // Buscar fatura no banco
+		  const { data: fatura } = await supabase
+			.from("faturas")
+			.select("id")
+			.eq("user_id", userId)
+			.eq("stripe_subscription_id", subscriptionId)
+			.maybeSingle();
+
+		  if (fatura) {
+			// Adicionar ao histórico
+			const { error } = await supabase
+			  .from("faturas_historico")
+			  .upsert({
+				fatura_id: fatura.id,
+				data: new Date(invoice.created * 1000).toISOString(),
+				valor: invoice.amount_paid || 0,
+				status: invoice.status || 'paid',
+				pago: invoice.status === 'paid',
+				link_fatura: invoice.hosted_invoice_url,
+				subscription_id: subscriptionId
+			  }, {
+				onConflict: 'fatura_id,data,subscription_id',
+				ignoreDuplicates: true
+			  });
+
+			if (error) {
+			  console.error("❌ Erro ao adicionar ao histórico:", error);
+			} else {
+			  console.log("✅ Fatura adicionada ao histórico");
+			}
+		  }
+		  break;
+		}
 
       default:
         console.log(`🤷 Evento não tratado: ${event.type}`);
     }
 
+    console.log("✅ Webhook processado com sucesso");
     return res.status(200).json({ received: true });
+    
   } catch (err: any) {
-    console.error("❌ Erro interno no webhook:", {
+    console.error("❌ Erro crítico no webhook:", {
       message: err.message,
       stack: err.stack,
+      event_type: event?.type,
+      event_id: event?.id
     });
-    return res.status(500).send("Erro interno no webhook.");
+    return res.status(500).send("Erro interno");
   }
 }
