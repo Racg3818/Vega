@@ -33,37 +33,11 @@ if (
 let access_token = null;
 let user_id = null;
 
-async function esperarCredenciais(timeout = 5000) {
-  return new Promise((resolve, reject) => {
-    const interval = 500;
-    const maxTentativas = timeout / interval;
-    let tentativas = 0;
-
-    const checar = () => {
-      chrome.runtime.sendMessage({ type: "GET_USER_TOKEN" }, (response) => {
-        if (response?.access_token && response?.user_id) {
-          console.log("🔐 Credenciais recuperadas com sucesso:", response);
-          resolve(response);
-        } else {
-          tentativas++;
-          console.warn("🕒 Aguardando token no background... tentativa", tentativas);
-          if (tentativas >= maxTentativas) {
-            reject("❌ Token/user_id ausentes após aguardo.");
-          } else {
-            setTimeout(checar, interval);
-          }
-        }
-      });
-    };
-
-    checar();
-  });
-}
-
-
 // ============ CONSTANTES ============
 
 const logCompras = [];
+
+//Criar webpack para produção depois
 const supabaseUrl = "https://rgkvzoeanbkbeqjbntdq.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJna3Z6b2VhbmJrYmVxamJudGRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA5MDczMjEsImV4cCI6MjA2NjQ4MzMyMX0.Qhy9GQOJD0wLSBmGLdS6QGxvERfST2FYqCDBo-F1njk";
 
@@ -114,6 +88,7 @@ if (window.location.href.includes("https://experiencia.xpi.com.br/conta-corrente
 
 
     try {
+	  await new Promise(resolve => setTimeout(resolve, 1000));
       const saldoCapturado = await esperarSaldo();
       console.log("💰 Saldo capturado com sucesso:", saldoCapturado);
       localStorage.setItem("saldoXP", saldoCapturado);
@@ -125,7 +100,6 @@ if (window.location.href.includes("https://experiencia.xpi.com.br/conta-corrente
 }
  
 
-
 // ============ ALÍQUOTAS REGRESSIVAS DE IR ============
 function calcularAliquotaIR(diasCorridos) {
   if (diasCorridos <= 180) return 0.225;
@@ -133,6 +107,14 @@ function calcularAliquotaIR(diasCorridos) {
   if (diasCorridos > 360 && diasCorridos <= 720) return 0.175;
   return 0.15;
 }
+
+function converterCdiMaisParaPercentualCdi(xMais, cdi = 11) {
+  const taxaCDI = cdi / 100;
+  const taxaMais = xMais / 100;
+  const percentual = ((1 + taxaCDI + taxaMais) / (1 + taxaCDI)) * 100;
+  return percentual;
+}
+
 
 // ============ FUNÇÕES COMUNS (function) ============
 function dispararCliqueReal(elemento) {
@@ -269,6 +251,34 @@ const mapa = {
 };
 
 // ============ FUNÇÕES ASSÍNCRONAS ============
+
+async function esperarCredenciais(timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const interval = 500;
+    const maxTentativas = timeout / interval;
+    let tentativas = 0;
+
+    const checar = () => {
+      chrome.runtime.sendMessage({ type: "GET_USER_TOKEN" }, (response) => {
+        if (response?.access_token && response?.user_id) {
+          console.log("🔐 Credenciais recuperadas com sucesso:", response);
+          resolve(response);
+        } else {
+          tentativas++;
+          console.warn("🕒 Aguardando token no background... tentativa", tentativas);
+          if (tentativas >= maxTentativas) {
+            reject("❌ Token/user_id ausentes após aguardo.");
+          } else {
+            setTimeout(checar, interval);
+          }
+        }
+      });
+    };
+
+    checar();
+  });
+}
+
 async function esperarElemento(seletorOuXPath, timeout = 2000, isXPath = true) {
   const intervalo = 500;
   const maxTentativas = timeout / intervalo;
@@ -587,6 +597,61 @@ async function clicarBotaoFinalAposSenha() {
   return true;
 }
 
+async function garantirTodosAtivosCarregados() {
+  console.log("🔄 Garantindo que TODOS os ativos sejam carregados...");
+  
+  let tentativasGerais = 0;
+  let ultimaContagem = 0;
+  
+  while (tentativasGerais < 2) { // Até 2 ciclos completos
+    console.log(`🔁 Ciclo ${tentativasGerais + 1} de carregamento...`);
+    
+    //await garantirTodosAtivosCarregados();
+    
+    const contagemAtual = document.querySelectorAll("soma-table-body soma-table-row").length;
+    console.log(`📊 Ativos após ciclo ${tentativasGerais + 1}: ${contagemAtual}`);
+    
+    if (contagemAtual === ultimaContagem) {
+      console.log("✅ Contagem estável - todos ativos carregados!");
+      break;
+    }
+    
+    ultimaContagem = contagemAtual;
+    tentativasGerais++;
+    
+    // Pausa entre ciclos
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  
+  return ultimaContagem;
+}
+
+// FUNÇÃO PARA FORÇAR CARREGAMENTO POR SCROLL DA PÁGINA INTEIRA
+async function forcarCarregamentoCompleto() {
+  console.log("🚀 Forçando carregamento completo da página...");
+  
+  // Scroll na página inteira primeiro
+  window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 500));
+  
+  const alturaTotal = Math.max(
+    document.body.scrollHeight,
+    document.documentElement.scrollHeight
+  );
+  
+  const passos = 5;
+  const passo = alturaTotal / passos;
+  
+  for (let i = 0; i <= passos; i++) {
+    window.scrollTo(0, passo * i);
+    console.log(`📜 Scroll página: ${Math.round((i/passos) * 100)}%`);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  
+  // Agora rola especificamente a tabela
+  //await forcarCarregamentoCompleto();
+}
+
 esperarCredenciais().then((credenciais) => {
 	access_token = credenciais.access_token;
 	user_id = credenciais.user_id;
@@ -687,20 +752,43 @@ async function aplicarFiltrosXP(supabase) {
 			if (["assinatura", "limite_compra", "ordem_classe", "taxa_minima"].includes(grupo)) continue;
 			const valores = filtros[grupo];
 			for (const valor of valores) {
-			  const label = mapa[grupo.toLowerCase()]?.[valor];
-			  if (!label) {
-				console.warn(`⚠️ Label não encontrado no mapa para grupo '${grupo}', valor '${valor}'`);
-				continue;
-			  }
+			  
+			  let labelsParaAplicar = [];
 
-			  const xpath = `//soma-chip[contains(., '${label}')]`;
-			  const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-			  if (chip) {
-				chip.click();
-				console.log(`✅ Filtro aplicado: [${grupo}] → ${label}`);
-			  } else {
-				console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
-			  }
+				if (grupo === "vencimento") {
+				  const todas = [
+					{ chave: "ate_6_meses", ordem: 1 },
+					{ chave: "ate_1_ano", ordem: 2 },
+					{ chave: "ate_2_anos", ordem: 3 },
+					{ chave: "ate_3_anos", ordem: 4 },
+					{ chave: "ate_5_anos", ordem: 5 },
+					{ chave: "acima_5_anos", ordem: 6 },
+				  ];
+
+				  const valorSelecionado = todas.find(t => t.chave === valor);
+				  if (valorSelecionado) {
+					labelsParaAplicar = todas
+					  .filter(t => t.ordem <= valorSelecionado.ordem)
+					  .map(t => mapa[grupo.toLowerCase()]?.[t.chave])
+					  .filter(Boolean);
+				  }
+				} else {
+				  const label = mapa[grupo.toLowerCase()]?.[valor];
+				  if (label) labelsParaAplicar = [label];
+				}
+
+				for (const label of labelsParaAplicar) {
+				  const xpath = `//soma-chip[contains(., '${label}')]`;
+				  const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+				  if (chip) {
+					chip.click();
+					console.log(`✅ Filtro aplicado: [${grupo}] → ${label}`);
+				  } else {
+					console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
+				  }
+				  await new Promise(r => setTimeout(r, 300));
+				}		  
+			  
 			  await new Promise(r => setTimeout(r, 300));
 			}
 		  }
@@ -726,7 +814,7 @@ async function aplicarFiltrosXP(supabase) {
 		try {
 		  console.log("🕒 Aguardando carregamento da tabela de ativos...");
 		  await esperarElemento("soma-table-body soma-table-row", 5000, false);
-		  await rolarAteFinalTabelaAtivos();
+		  await forcarCarregamentoCompleto();
 		  
 		} catch (err) {
 		  console.error("❌ Erro ao aguardar a tabela de ativos:", err);
@@ -780,38 +868,73 @@ async function aplicarFiltrosXP(supabase) {
 		  
 		  // Só calcula e envia se tiver ativos suficientes
 		  if (ativos.length > 0) {
+			  
+			let cdiAtual = 11; //fallback caso o código não leia o CDI corretamente
+			  
+			await new Promise((resolve) => {
+				chrome.runtime.sendMessage({ type: "BUSCAR_CDI" }, (resposta) => {
+				  if (resposta?.cdi) {
+					cdiAtual = resposta.cdi;
+					console.log("📊 CDI retornado pelo background:", cdiAtual);
+				  } else {
+					console.warn("⚠️ CDI não retornado, usando fallback:", cdiAtual);
+				  }
+				  resolve();
+				});
+			  });
+
+			
 			const formatarMedia = (ativosGrupo, classe) => {
 			  if (ativosGrupo.length === 0) return null;
 
+			  const CDI_PROJETADO = cdiAtual; // em percentual anual
+
 			  const taxasNumericas = ativosGrupo.map(a => {
 				const t = a.taxaTexto.toUpperCase();
+
 				if (classe === "IPCA") {
 				  const m = t.match(/IPCA\s*\+?\s*([\d,\.]+)/);
 				  return m ? parseFloat(m[1].replace(",", ".")) : null;
-				} else if (classe === "CDI") {
-				  if (t.includes("CDI +")) {
+				}
+
+				if (classe === "CDI") {
+				  // Para "CDI + X%" (spread sobre CDI) - converte para percentual do CDI
+				  if (t.includes("CDI +") || t.includes("CDI+")) {
 					const m = t.match(/CDI\s*\+\s*([\d,\.]+)/);
-					return m ? parseFloat(m[1].replace(",", ".")) : null;
-				  } else if (t.includes("%") && !t.includes("+")) {
+					const spread = m ? parseFloat(m[1].replace(",", ".")) : null;
+					// Converte spread para percentual do CDI
+					// Exemplo: CDI + 2% com CDI a 11% = (11 + 2) / 11 * 100 = 118,18% do CDI
+					return spread !== null ? ((CDI_PROJETADO + spread) / CDI_PROJETADO) * 100 : null;
+				  } 
+				  // Para "X% CDI" ou "X% DO CDI" - já é percentual do CDI
+				  else if (t.includes("% CDI") || t.includes("% DO CDI")) {
 					const m = t.match(/([\d,\.]+)\s*%/);
 					return m ? parseFloat(m[1].replace(",", ".")) : null;
 				  }
-				} else {
-				  const m = t.match(/([\d,\.]+)\s*%/);
-				  return m ? parseFloat(m[1].replace(",", ".")) : null;
+				  // Para casos como "93,00% do CDI" - extrai o número antes de %
+				  else if (t.includes("% DO CDI") || t.includes("%DO CDI")) {
+					const m = t.match(/([\d,\.]+)\s*%/);
+					return m ? parseFloat(m[1].replace(",", ".")) : null;
+				  }
 				}
-				return null;
+
+				// Para pré-fixado ou outros casos
+				const m = t.match(/([\d,\.]+)\s*%/);
+				return m ? parseFloat(m[1].replace(",", ".")) : null;
 			  }).filter(n => typeof n === "number");
 
 			  if (taxasNumericas.length === 0) return null;
 
 			  const media = taxasNumericas.reduce((a, b) => a + b, 0) / taxasNumericas.length;
+			  
+			  console.log("Quantidade de ativos:", taxasNumericas.length)
+			  console.log("Media das taxas:", media)
 
 			  if (classe === "IPCA") return `IPCA + ${media.toFixed(2)}%`;
-			  if (classe === "CDI" && ativosGrupo[0].taxaTexto.includes("+")) return `CDI + ${media.toFixed(2)}%`;
-			  if (classe === "CDI") return `${media.toFixed(0)}% do CDI`;
+			  if (classe === "CDI") return `${media.toFixed(2)}% do CDI`; // ← AQUI: sempre retorna % do CDI
 			  return `${media.toFixed(2)}%`;
 			};
+
 
 			const ativosIsentos = ativos.filter(a => a.isento);
 			const ativosTributados = ativos.filter(a => !a.isento);
@@ -864,6 +987,11 @@ async function aplicarFiltrosXP(supabase) {
 				const taxaB = detectarIsencao(b.nome) ? calcularTaxaBrutaEquivalente(b.taxa, diasB) : b.taxa;
 				return taxaB - taxaA;
 			  });
+			  
+			  if (ativosFiltrados.length === 0) {
+				  console.warn("⛔ Nenhum ativo disponível com valor mínimo compatível com o saldo do usuário.");
+				}
+
 	 
 		  
 		  for (const ativo of ativosFiltrados) {
@@ -930,17 +1058,17 @@ async function aplicarFiltrosXP(supabase) {
 				});
 				
 				console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);
-
-
-				await new Promise(r => setTimeout(r, 1000));
-				await esperarElemento("soma-table-body soma-table-row", 10000, false);
-				//break; Comentado no dia 21/07
+				
+				//await new Promise(r => setTimeout(r, 1000));
+				//await esperarElemento("soma-table-body soma-table-row", 10000, false);
+				break; //Comentado no dia 21/07
 			}
 		}
-	}
+	}  
 	
-    if (logCompras.length > 0) {
-	  console.log("🚀 Enviando dados para Supabase...");
+	if (logCompras.length > 0) {
+	  console.log("🚀 Enviando dados para Supabase...");	 
+      console.log("Id o cliente:", user_id)	  	  
 
 	  const res = await fetch(`${supabaseUrl}/rest/v1/ativos_comprados`, {
 		method: "POST",
@@ -977,6 +1105,15 @@ async function aplicarFiltrosXP(supabase) {
 	  } else {
 		console.error("❌ Erro ao salvar no Supabase:", await res.text());
 	  }
+	  
+	  if (user_id) {
+		  chrome.runtime.sendMessage({
+			type: "FECHAR_FATURA_VARIAVEL",
+			user_id,
+		  });
+		} else {
+		  console.warn("⚠️ user_id não está disponível.");
+		}
 	}
   }catch (err) {
 	  console.error("Erro no script:", err);

@@ -179,7 +179,7 @@ export default function Graficos({ dados }: Props) {
 							  <span className="font-bold text-green-600">
 								{ganho.toFixed(2)}%
 							  </span>{" "}
-							  acima da média da plataforma nesse período.
+							  acima da taxa média anual da plataforma nesse período.
 							</p>
 						  );
 						})()}

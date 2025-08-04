@@ -212,8 +212,9 @@ export default function Dashboard() {
 						  {renderItem("investimentos", Banknote, menuAberto ? "Investimentos": "Invest.")}
 						  {renderItem("posicoes", FaUniversity, "Posições")}
 						  {renderItem("simulador", SiSimpleanalytics, "Simulador")}
-						  {renderItem("indicacoes", FaTags, "Indicações")}
 						  {renderItem("faturas", FaReceipt, "Faturas")}
+						  {renderItem("indicacoes", FaTags, "Indicações")}
+						  
 						</ul>
 					  </div>
 					  <div>
@@ -267,12 +268,13 @@ export default function Dashboard() {
 				  </div>
 				)}
 				
-				{telaAtiva === "indicacoes" && <div className="vega-card">🎁 Área de Indicações</div>}
 				{telaAtiva === "faturas" && (
 				  <div className="vega-card">
 					<Faturas />
 				  </div>
 				)}
+				
+				{telaAtiva === "indicacoes" && <div className="vega-card">🎁 Área de Indicações</div>}				
 
 				{telaAtiva === "configuracoes" && (
 				  <div className="vega-card">
@@ -326,7 +328,7 @@ export function useDadosTaxasComparadas(userId: string | undefined) {
         const isento = c.taxa_grossup?.toLowerCase().includes("isento");
         const data = c.data_hora_compra?.split("T")[0]; // pega apenas a data
 		const key = `${data}|${c.indexador}|${isento}`;
-        const taxa = parseFloat(c.taxa_grossup?.toString() || "0");
+        const taxa = parseFloat(c.taxa_contratada?.toString() || "0");
         const valor = Number(c.valor_aplicado) || 0;
 
         if (!agrupados[key]) agrupados[key] = { soma: 0, peso: 0 };

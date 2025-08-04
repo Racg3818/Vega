@@ -37,7 +37,7 @@ async function sincronizarHistoricoFaturas(faturaId: string, subscriptionId: str
         .select("id")
         .eq("fatura_id", faturaId)
         .eq("subscription_id", invoice.subscription)
-        .eq("data", new Date(invoice.created * 1000).toISOString())
+        .eq("data_criacao", new Date(invoice.created * 1000).toISOString())
         .maybeSingle();
 
       if (!existente) {
@@ -45,7 +45,7 @@ async function sincronizarHistoricoFaturas(faturaId: string, subscriptionId: str
           .from("faturas_historico")
           .insert({
             fatura_id: faturaId,
-            data: new Date(invoice.created * 1000).toISOString(),
+            data_criacao: new Date(invoice.created * 1000).toISOString(),
             valor: invoice.amount_paid || 0,
             status: invoice.status || 'unknown',
             pago: invoice.status === 'paid',
@@ -193,7 +193,7 @@ async function getSubscriptionValue(subscription: Stripe.Subscription): Promise<
       console.log("💰 Buscando preço para:", priceId);
       
       const price = await stripe.prices.retrieve(priceId);
-      const valor = price.unit_amount || 0;
+      const valor = parseFloat(((price.unit_amount || 0) / 100).toFixed(2));
       console.log("💰 Valor encontrado:", valor);
       return valor;
     }
@@ -240,37 +240,79 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     switch (event.type) {
       
-      case "checkout.session.completed": {
-        console.log("🛒 Processando checkout.session.completed");
-        const session = event.data.object as Stripe.Checkout.Session;
-        const customerId = session.customer as string;
-        const subscriptionId = session.subscription as string;
+      // Adicione esta lógica no caso "checkout.session.completed" do seu stripe.ts
 
-        console.log("🛒 Dados do checkout:", { customerId, subscriptionId });
+		case "checkout.session.completed": {
+		  console.log("🛒 Processando checkout.session.completed");
+		  const session = event.data.object as Stripe.Checkout.Session;
+		  const customerId = session.customer as string;
+		  const subscriptionId = session.subscription as string;
 
-        const userId = await getUserId(customerId);
-        if (!userId) {
-          console.warn("⚠️ UserID não encontrado, abortando");
-          break;
-        }
+		  console.log("🛒 Dados do checkout:", { customerId, subscriptionId });
 
-        try {
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
-            expand: ['items.data.price']
-          });
-          console.log("📋 Subscription recuperada:", subscription.id);
-          
-          const success = await upsertFatura(userId, subscription);
-          if (success) {
-            console.log("✅ Checkout processado com sucesso");
-          } else {
-            console.error("❌ Falha ao processar checkout");
-          }
-        } catch (err) {
-          console.error("❌ Erro ao buscar subscription:", err);
-        }
-        break;
-      }
+		  const userId = await getUserId(customerId);
+		  if (!userId) {
+			console.warn("⚠️ UserID não encontrado, abortando");
+			break;
+		  }
+
+		  try {
+			const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+			  expand: ['items.data.price']
+			});
+			console.log("📋 Subscription recuperada:", subscription.id);
+			
+			// ✅ NOVO: Definir método de pagamento como padrão
+			if (subscription.default_payment_method || subscription.latest_invoice) {
+			  let paymentMethodId = subscription.default_payment_method as string;
+			  
+			  // Se não tiver payment_method na subscription, buscar na invoice
+			  if (!paymentMethodId && subscription.latest_invoice) {
+				try {
+				  const invoice = await stripe.invoices.retrieve(subscription.latest_invoice as string, {
+					expand: ['payment_intent']
+				  });
+				  
+				  if (invoice.payment_intent && typeof invoice.payment_intent === 'object') {
+					paymentMethodId = invoice.payment_intent.payment_method as string;
+				  }
+				} catch (invoiceError) {
+				  console.warn("⚠️ Erro ao buscar payment_method da invoice:", invoiceError);
+				}
+			  }
+			  
+			  // Definir como padrão na subscription
+			  if (paymentMethodId) {
+				try {
+				  await stripe.subscriptions.update(subscriptionId, {
+					default_payment_method: paymentMethodId
+				  });
+				  
+				  // Opcional: Definir como padrão no customer também
+				  await stripe.customers.update(customerId, {
+					invoice_settings: {
+					  default_payment_method: paymentMethodId
+					}
+				  });
+				  
+				  console.log("✅ Método de pagamento definido como padrão:", paymentMethodId);
+				} catch (paymentMethodError) {
+				  console.warn("⚠️ Erro ao definir método padrão:", paymentMethodError);
+				}
+			  }
+			}
+			
+			const success = await upsertFatura(userId, subscription);
+			if (success) {
+			  console.log("✅ Checkout processado com sucesso");
+			} else {
+			  console.error("❌ Falha ao processar checkout");
+			}
+		  } catch (err) {
+			console.error("❌ Erro ao buscar subscription:", err);
+		  }
+		  break;
+		}
 
       case "customer.subscription.created":
       case "customer.subscription.updated": {
@@ -344,24 +386,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 		  console.log("💰 Processando invoice.payment_succeeded");
 		  const invoice = event.data.object as Stripe.Invoice;
 		  const customerId = invoice.customer as string;
-		  const subscriptionId = invoice.subscription as string;
+		  const subscriptionId = invoice.subscription as string | null;
 
 		  const userId = await getUserId(customerId);
-		  if (!userId || !subscriptionId) break;
+		  if (!userId) break;
 
-		  // Buscar fatura no banco
-		  const { data: fatura } = await supabase
-			.from("faturas")
-			.select("id")
-			.eq("user_id", userId)
-			.eq("stripe_subscription_id", subscriptionId)
-			.maybeSingle();
+		  // 🧠 Verifica se é fatura mensal ou variável
+		  if (subscriptionId) {
+			// 🔄 MENSAL (código mantido igual)
+			const { data: fatura } = await supabase
+			  .from("faturas")
+			  .select("id")
+			  .eq("user_id", userId)
+			  .eq("stripe_subscription_id", subscriptionId)
+			  .maybeSingle();
 
-		  if (fatura) {
-			// Adicionar ao histórico
-			const { error } = await supabase
-			  .from("faturas_historico")
-			  .upsert({
+			if (fatura) {
+			  await supabase.from("faturas_historico").upsert({
 				fatura_id: fatura.id,
 				data: new Date(invoice.created * 1000).toISOString(),
 				valor: invoice.amount_paid || 0,
@@ -373,13 +414,143 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 				onConflict: 'fatura_id,data,subscription_id',
 				ignoreDuplicates: true
 			  });
+			  console.log("✅ Histórico atualizado para fatura mensal");
+			}
 
-			if (error) {
-			  console.error("❌ Erro ao adicionar ao histórico:", error);
+		  } else {
+			// 📊 VARIÁVEL - COM VALIDAÇÃO DE VALOR
+			console.log("🔍 Verificando se é fatura variável...");
+			
+			// Verificar se é fatura variável pelo metadata ou description
+			const isVariavel = invoice.metadata?.tipo_fatura === 'variavel' || 
+							 invoice.lines.data.some(line => 
+							   line.description?.includes('Taxa variável Vega')
+							 );
+
+			if (isVariavel) {
+			  console.log("📊 Confirmado: É uma fatura variável");
+			  
+			  // 🚨 VALIDAÇÃO CRÍTICA: Verificar se o valor é maior que zero
+			  const valorFatura = invoice.amount_paid || 0;
+			  
+			  if (valorFatura <= 0) {
+				console.log(`⚠️ Fatura variável com valor R$ ${valorFatura / 100} ignorada (valor zero ou negativo)`);
+				console.log("ℹ️ Motivo: Não há diferença nas taxas contratuais, portanto não há cobrança adicional");
+				break; // Sai do case sem processar
+			  }
+			  
+			  console.log(`💰 Valor válido detectado: R$ ${valorFatura / 100}`);
+			  
+			  // 🔑 Capturar forma de pagamento
+			  let formaPagamento = 'unknown';
+			  let detalhesFormaPagamento = {};
+			  
+			  try {
+				if (invoice.payment_intent) {
+				  console.log("🔍 Buscando detalhes do PaymentIntent:", invoice.payment_intent);
+				  
+				  const paymentIntent = await stripe.paymentIntents.retrieve(
+					invoice.payment_intent as string,
+					{ expand: ['payment_method'] }
+				  );
+				  
+				  if (paymentIntent.payment_method) {
+					const paymentMethod = paymentIntent.payment_method as Stripe.PaymentMethod;
+					formaPagamento = paymentMethod.type;
+					
+					// Capturar detalhes específicos baseado no tipo
+					switch (paymentMethod.type) {
+					  case 'card':
+						detalhesFormaPagamento = {
+						  brand: paymentMethod.card?.brand,
+						  last4: paymentMethod.card?.last4,
+						  exp_month: paymentMethod.card?.exp_month,
+						  exp_year: paymentMethod.card?.exp_year,
+						  funding: paymentMethod.card?.funding
+						};
+						break;
+					  case 'boleto':
+						detalhesFormaPagamento = {
+						  tax_id: paymentMethod.boleto?.tax_id
+						};
+						break;
+					  case 'pix':
+						detalhesFormaPagamento = {
+						  bank: paymentMethod.pix?.bank
+						};
+						break;
+					  default:
+						detalhesFormaPagamento = { type: paymentMethod.type };
+					}
+					
+					console.log("💳 Forma de pagamento identificada:", {
+					  type: formaPagamento,
+					  details: detalhesFormaPagamento
+					});
+				  }
+				}
+			  } catch (paymentError) {
+				console.warn("⚠️ Erro ao buscar forma de pagamento:", paymentError);
+				formaPagamento = 'error_retrieving';
+			  }
+			  
+			  console.log("📝 Registrando fatura variável individual...");
+			  
+			  const { data: faturaVariavel, error: erroFaturaVar } = await supabase
+				.from("faturas")
+				.insert({
+				  user_id: userId,
+				  stripe_customer_id: customerId,
+				  stripe_invoice_id: invoice.id,
+				  tipo_fatura: "variavel",
+				  valor: valorFatura, // Usar a variável validada
+				  status: 'paid',
+				  plano: "variavel",
+				  problema_pagamento: false,
+				  motivo_problema: null,
+				  criado_em: new Date(invoice.created * 1000).toISOString(),
+				  periodo_cobranca: new Date().toISOString().split('T')[0],
+				  forma_pagamento: formaPagamento,
+				  detalhes: JSON.stringify({
+					stripe_invoice_id: invoice.id,
+					amount_paid: valorFatura,
+					currency: invoice.currency,
+					invoice_pdf: invoice.invoice_pdf,
+					payment_method: {
+					  type: formaPagamento,
+					  details: detalhesFormaPagamento,
+					  payment_intent_id: invoice.payment_intent
+					}
+				  })
+				})
+				.select("id")
+				.single();
+
+			  if (erroFaturaVar) {
+				console.error("❌ Erro ao salvar fatura variável:", erroFaturaVar);
+				
+				if (erroFaturaVar.code === '23505') {
+				  console.log("ℹ️ Fatura já processada anteriormente (duplicate key)");
+				}
+			  } else {
+				// Registrar no histórico
+				await supabase.from("faturas_historico").insert({
+				  fatura_id: faturaVariavel.id,
+				  data_criacao: new Date(invoice.created * 1000).toISOString(),
+				  valor: valorFatura,
+				  status: 'paid',
+				  pago: true,
+				  link_fatura: invoice.hosted_invoice_url,
+				  subscription_id: null
+				});
+				
+				console.log(`✅ Fatura variável registrada: R$ ${valorFatura / 100} (Invoice: ${invoice.id}) - Forma: ${formaPagamento}`);
+			  }
 			} else {
-			  console.log("✅ Fatura adicionada ao histórico");
+			  console.log("ℹ️ Fatura não identificada como variável, ignorando...");
 			}
 		  }
+
 		  break;
 		}
 

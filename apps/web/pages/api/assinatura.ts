@@ -25,6 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     
     // ✅ POST - Criar/Reativar assinatura (SEM SINCRONIZAÇÃO)
     if (method === "POST") {
+		  
 		  if (!email) {
 			return res.status(400).json({ error: "email é obrigatório" });
 		  }
@@ -134,6 +135,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 			  metadata: { user_id },
 			  allow_promotion_codes: true, // ✅ Permitir códigos promocionais
 			  billing_address_collection: 'auto', // ✅ Coletar endereço se necessário
+			  	  
 			});
 
 			return res.status(200).json({ session_url: session.url });
