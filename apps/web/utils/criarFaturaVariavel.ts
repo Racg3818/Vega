@@ -137,9 +137,15 @@ export async function criarFaturaVariavel(user_id: string, stripeCustomerId: str
 		// CORREÇÃO 3: Melhorar extração da taxa média
 		let taxaMedia = 0;
 		if (taxaRef.taxa_media) {
-		  const match = taxaRef.taxa_media.match(/([\d,\.]+)/);
-		  taxaMedia = match ? parseFloat(match[1].replace(",", ".")) : 0;
+		  const normalizado = taxaRef.taxa_media
+			.replace("do CDI", "")
+			.replace("%", "")
+			.replace(",", ".")
+			.trim();
+
+		  taxaMedia = parseFloat(normalizado);
 		}
+
 		
 		console.log(`   📊 Taxa média encontrada: ${taxaRef.taxa_media} → ${taxaMedia}%`);
 		
@@ -187,9 +193,10 @@ export async function criarFaturaVariavel(user_id: string, stripeCustomerId: str
 	  console.log(`💰 VALOR TOTAL: R$ ${valorTotal.toFixed(2)}`);
 
 	  if (valorTotal < 0.01) {
-		console.log("⚠️ Valor muito baixo. Detalhes dos cálculos salvos para análise.");
-		throw new Error("Valor total da fatura variável é muito baixo para ser cobrado.");
-	  }
+		  console.log("⚠️ Valor muito baixo. Detalhes dos cálculos salvos para análise.");
+		  return { status: "sem_cobranca", detalhes: detalhesCalculos, valorTotal };
+		}
+
 	  
 	  const { data: registroFatura, error: erroRegistro } = await supabase
 		  .from("faturas_historico")

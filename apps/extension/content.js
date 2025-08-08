@@ -869,117 +869,74 @@ async function aplicarFiltrosXP(supabase) {
 		  // Só calcula e envia se tiver ativos suficientes
 		  if (ativos.length > 0) {
 			  
-			let cdiAtual = 11; //fallback caso o código não leia o CDI corretamente
-			  
-			await new Promise((resolve) => {
-				chrome.runtime.sendMessage({ type: "BUSCAR_CDI" }, (resposta) => {
-				  if (resposta?.cdi) {
-					cdiAtual = resposta.cdi;
-					console.log("📊 CDI retornado pelo background:", cdiAtual);
-				  } else {
-					console.warn("⚠️ CDI não retornado, usando fallback:", cdiAtual);
-				  }
-				  resolve();
-				});
-			  });
+				let cdiAtual = 11; //fallback caso o código não leia o CDI corretamente
+				  
+				await new Promise((resolve) => {
+					chrome.runtime.sendMessage({ type: "BUSCAR_CDI" }, (resposta) => {
+					  if (resposta?.cdi) {
+						cdiAtual = resposta.cdi;
+						console.log("📊 CDI retornado pelo background:", cdiAtual);
+					  } else {
+						console.warn("⚠️ CDI não retornado, usando fallback:", cdiAtual);
+					  }
+					  resolve();
+					});
+				  });
 
-			
-			const formatarMedia = (ativosGrupo, classe) => {
-			  if (ativosGrupo.length === 0) return null;
+				
+				const formatarMedia = (ativosGrupo, classe) => {
+				  if (ativosGrupo.length === 0) return null;
 
-			  const CDI_PROJETADO = cdiAtual; // em percentual anual
+				  const CDI_PROJETADO = cdiAtual; // em percentual anual
 
-			  const taxasNumericas = ativosGrupo.map(a => {
-				const t = a.taxaTexto.toUpperCase();
+				  const taxasNumericas = ativosGrupo.map(a => {
+					const t = a.taxaTexto.toUpperCase();
 
-				if (classe === "IPCA") {
-				  const m = t.match(/IPCA\s*\+?\s*([\d,\.]+)/);
-				  return m ? parseFloat(m[1].replace(",", ".")) : null;
-				}
+					if (classe === "IPCA") {
+					  const m = t.match(/IPCA\s*\+?\s*([\d,\.]+)/);
+					  return m ? parseFloat(m[1].replace(",", ".")) : null;
+					}
 
-				if (classe === "CDI") {
-				  // Para "CDI + X%" (spread sobre CDI) - converte para percentual do CDI
-				  if (t.includes("CDI +") || t.includes("CDI+")) {
-					const m = t.match(/CDI\s*\+\s*([\d,\.]+)/);
-					const spread = m ? parseFloat(m[1].replace(",", ".")) : null;
-					// Converte spread para percentual do CDI
-					// Exemplo: CDI + 2% com CDI a 11% = (11 + 2) / 11 * 100 = 118,18% do CDI
-					return spread !== null ? ((CDI_PROJETADO + spread) / CDI_PROJETADO) * 100 : null;
-				  } 
-				  // Para "X% CDI" ou "X% DO CDI" - já é percentual do CDI
-				  else if (t.includes("% CDI") || t.includes("% DO CDI")) {
+					if (classe === "CDI") {
+					  // Para "CDI + X%" (spread sobre CDI) - converte para percentual do CDI
+					  if (t.includes("CDI +") || t.includes("CDI+")) {
+						const m = t.match(/CDI\s*\+\s*([\d,\.]+)/);
+						const spread = m ? parseFloat(m[1].replace(",", ".")) : null;
+						// Converte spread para percentual do CDI
+						// Exemplo: CDI + 2% com CDI a 11% = (11 + 2) / 11 * 100 = 118,18% do CDI
+						return spread !== null ? ((CDI_PROJETADO + spread) / CDI_PROJETADO) * 100 : null;
+					  } 
+					  // Para "X% CDI" ou "X% DO CDI" - já é percentual do CDI
+					  else if (t.includes("% CDI") || t.includes("% DO CDI")) {
+						const m = t.match(/([\d,\.]+)\s*%/);
+						return m ? parseFloat(m[1].replace(",", ".")) : null;
+					  }
+					  // Para casos como "93,00% do CDI" - extrai o número antes de %
+					  else if (t.includes("% DO CDI") || t.includes("%DO CDI")) {
+						const m = t.match(/([\d,\.]+)\s*%/);
+						return m ? parseFloat(m[1].replace(",", ".")) : null;
+					  }
+					}
+
+					// Para pré-fixado ou outros casos
 					const m = t.match(/([\d,\.]+)\s*%/);
 					return m ? parseFloat(m[1].replace(",", ".")) : null;
-				  }
-				  // Para casos como "93,00% do CDI" - extrai o número antes de %
-				  else if (t.includes("% DO CDI") || t.includes("%DO CDI")) {
-					const m = t.match(/([\d,\.]+)\s*%/);
-					return m ? parseFloat(m[1].replace(",", ".")) : null;
-				  }
-				}
+				  }).filter(n => typeof n === "number");
 
-				// Para pré-fixado ou outros casos
-				const m = t.match(/([\d,\.]+)\s*%/);
-				return m ? parseFloat(m[1].replace(",", ".")) : null;
-			  }).filter(n => typeof n === "number");
+				  if (taxasNumericas.length === 0) return null;
 
-			  if (taxasNumericas.length === 0) return null;
-
-			  const media = taxasNumericas.reduce((a, b) => a + b, 0) / taxasNumericas.length;
-			  
-			  console.log("Quantidade de ativos:", taxasNumericas.length)
-			  console.log("Media das taxas:", media)
-
-			  if (classe === "IPCA") return `IPCA + ${media.toFixed(2)}%`;
-			  if (classe === "CDI") return `${media.toFixed(2)}% do CDI`; // ← AQUI: sempre retorna % do CDI
-			  return `${media.toFixed(2)}%`;
-			};
-
-
-			const ativosIsentos = ativos.filter(a => a.isento);
-			const ativosTributados = ativos.filter(a => !a.isento);
-
-			const mediaIsentos = formatarMedia(ativosIsentos, classe.toUpperCase());
-			const mediaTributados = formatarMedia(ativosTributados, classe.toUpperCase());
-
-			const payloads = [];
-			if (mediaIsentos) {
-			  console.log("🔍 Média ISENTOS calculada:", mediaIsentos);
-			  payloads.push({
-				user_id,
-				data_referencia: new Date().toISOString().split("T")[0],
-				indexador: classe.toUpperCase(),
-				taxa_media: mediaIsentos,
-				isento_imposto: true
-			  });
-			}
-			if (mediaTributados) {
-			  console.log("🔍 Média TRIBUTADOS calculada:", mediaTributados);
-			  payloads.push({
-				user_id,
-				data_referencia: new Date().toISOString().split("T")[0],
-				indexador: classe.toUpperCase(),
-				taxa_media: mediaTributados,
-				isento_imposto: false
-			  });
-			}
-
-			for (const payload of payloads) {
-			  console.log("📩 Enviando taxa média para o Supabase:", payload);
-			  await fetch(`${supabaseUrl}/rest/v1/taxas_media_xp`, {
-				  method: "POST",
-				  headers: {
-					"Content-Type": "application/json",
-					"apikey": supabaseAnonKey,
-					"Authorization": `Bearer ${access_token}` // ← isso agora está certo
-				  },
-				  body: JSON.stringify(payload)
-				});
-			}
-		  }
-			
-			const ativosFiltrados = ativos
-			  .filter(ativo => ativo.valorMinimo <= saldoTotal) // ← novo filtro
+				  const media = taxasNumericas.reduce((a, b) => a + b, 0) / taxasNumericas.length;
+				  
+				  console.log("Quantidade de ativos:", taxasNumericas.length)
+				  console.log("Taxa média encontrada:", media);
+				  
+				  if (classe === "IPCA") return `IPCA + ${media.toFixed(2)}%`;
+				  if (classe === "CDI") return `${media.toFixed(2)}% do CDI`;
+				  return `${media.toFixed(2)}%`;
+				};
+				
+				const ativosFiltrados = ativos
+			  .filter(ativo => ativo.valorMinimo <= saldoTotal) 
 			  .sort((a, b) => {
 				const diasA = calcularDiasCorridos(a.vencimentoStr);
 				const diasB = calcularDiasCorridos(b.vencimentoStr);
@@ -991,78 +948,147 @@ async function aplicarFiltrosXP(supabase) {
 			  if (ativosFiltrados.length === 0) {
 				  console.warn("⛔ Nenhum ativo disponível com valor mínimo compatível com o saldo do usuário.");
 				}
-
-	 
 		  
-		  for (const ativo of ativosFiltrados) {
-		  
-				const isIsento = detectarIsencao(ativo.nome);
-				const diasAteVencimento = calcularDiasCorridos(ativo.vencimentoStr);
-				const taxaComparada = isIsento ? calcularTaxaBrutaEquivalente(ativo.taxa, diasAteVencimento) : ativo.taxa;
+				const ativosOrdenados = ativosFiltrados
+				  .map((ativo) => {
+					const isIsento = detectarIsencao(ativo.nome);
+					const dias = calcularDiasCorridos(ativo.vencimentoStr);
+					const taxaEfetiva = isIsento
+					  ? calcularTaxaBrutaEquivalente(ativo.taxa, dias)
+					  : ativo.taxa;
 
-				console.log(`📊 Comparando ativo '${ativo.nome}' (${classe}): ${ativo.taxa}% ${isIsento ? "(isento IR)" : ""} → ${taxaComparada}% (mínima: ${taxasMin[classe]}%)`);
+					return {
+					  ...ativo,
+					  taxaEfetiva,
+					  isIsento,
+					  diasCorridos: dias
+					};
+				  })
+				  .filter((a) => a.taxaEfetiva >= taxasMin[classe] && ativoPassaFiltroAplicMin(a.valorMinimo))
+				  .sort((a, b) => b.taxaEfetiva - a.taxaEfetiva);
 
-				if (taxaComparada < taxasMin[classe]) continue;
-				if (!ativoPassaFiltroAplicMin(ativo.valorMinimo)) continue;
+				// 🧾 Log dos ativos ordenados
+				console.log(`📋 Ativos elegíveis na classe ${classe.toUpperCase()}:`);
+				ativosOrdenados.forEach((a, i) => {
+				  console.log(
+					`#${i + 1}: ${a.nome} | Taxa bruta: ${a.taxaEfetiva}% | Min: R$${a.valorMinimo} | Venc: ${a.vencimentoStr} | ${a.isIsento ? "ISENTO" : "TRIBUTADO"}`
+				  );
+				});
 
-				ativo.botao.scrollIntoView({ behavior: "smooth", block: "center" });
-				await new Promise(r => setTimeout(r, 100));
-				dispararCliqueReal(ativo.botao);
-				console.log("✅ Clique no botão 'Investir' efetuado.");
-				await new Promise(r => setTimeout(r, 600));
+				const melhorAtivo = ativosOrdenados[0];
 
-				if (ativo.valorMinimo > saldoTotal) {
-				  console.warn(`⛔ Saldo insuficiente: mínimo R$${ativo.valorMinimo} > saldo R$${saldoTotal}`);
-				  continue;
+				const vencimentoLimite = melhorAtivo?.vencimentoStr
+				  ? new Date(melhorAtivo.vencimentoStr)
+				  : null;
+
+				const ativosIsentos = ativos.filter(a =>
+				  a.isento &&
+				  (!vencimentoLimite || new Date(a.vencimentoStr) <= vencimentoLimite)
+				);
+
+				const ativosTributados = ativos.filter(a =>
+				  !a.isento &&
+				  (!vencimentoLimite || new Date(a.vencimentoStr) <= vencimentoLimite)
+				);
+				
+				console.log("📊 Ativos ISENTOS considerados na média:");
+				ativosIsentos.forEach(a => {
+				  console.log(`- ${a.nome} | Taxa: ${a.taxaTexto} | Vencimento: ${a.vencimentoStr}`);
+				});
+
+				console.log("📊 Ativos TRIBUTADOS considerados na média:");
+				ativosTributados.forEach(a => {
+				  console.log(`- ${a.nome} | Taxa: ${a.taxaTexto} | Vencimento: ${a.vencimentoStr}`);
+				});
+
+
+				const mediaIsentos = formatarMedia(ativosIsentos, classe.toUpperCase());
+				const mediaTributados = formatarMedia(ativosTributados, classe.toUpperCase());
+
+				const payloads = [];
+				if (mediaIsentos) {
+				  console.log("🔍 Média ISENTOS calculada:", mediaIsentos);
+				  payloads.push({
+					user_id,
+					data_referencia: new Date().toISOString().split("T")[0],
+					indexador: classe.toUpperCase(),
+					taxa_media: mediaIsentos,
+					isento_imposto: true
+				  });
+				}
+				if (mediaTributados) {
+				  console.log("🔍 Média TRIBUTADOS calculada:", mediaTributados);
+				  payloads.push({
+					user_id,
+					data_referencia: new Date().toISOString().split("T")[0],
+					indexador: classe.toUpperCase(),
+					taxa_media: mediaTributados,
+					isento_imposto: false
+				  });
 				}
 
-				const valorIdeal = Math.min(saldoTotal, limite);
-				const valorCompra = Math.max(ativo.valorMinimo, valorIdeal);
+				for (const payload of payloads) {
+				  console.log("📩 Enviando taxa média para o Supabase:", payload);
+				  await fetch(`${supabaseUrl}/rest/v1/taxas_media_xp`, {
+					  method: "POST",
+					  headers: {
+						"Content-Type": "application/json",
+						"apikey": supabaseAnonKey,
+						"Authorization": `Bearer ${access_token}`,
+						"Prefer": "resolution=merge-duplicates"
+					  },
+					  body: JSON.stringify(payload)
+					});
 
+				}
 				
-				const quantidadeOk = await preencherCampoQuantidadeInvestida(valorCompra, ativo.valorMinimo);
-				if (!quantidadeOk) continue;
+				if (melhorAtivo) {
+				  const { taxaEfetiva, taxa, nome, vencimentoStr, valorMinimo, botao } = melhorAtivo;
+				  const isIsento = detectarIsencao(nome);
 
-				await marcarCheckboxConfirmacao();
-				await clicarBotaoAvancarEtapa();
-				await new Promise(r => setTimeout(r, 500)); // dá tempo para tela carregar
-				await marcarCheckboxEAvancar(); 
-				
-				const senhaOk = await digitarSenhaEletronica(assinatura) || true; //APAGAR DEPOIS - TESTE
+				  console.log(`📊 Melhor ativo encontrado: '${nome}' com taxa efetiva ${taxaEfetiva}%`);
 
-				
-				//const senhaOk = await digitarSenhaEletronica(assinatura); // assinatura já está carregada via filtros
-				// ⚠️ BYPASS DE TESTE ATIVO:
-				// Comentado temporariamente para permitir testes mesmo com assinatura incorreta
-				// if (!senhaOk) {
-				//   console.warn("⚠️ A senha eletrônica não pôde ser digitada.");
-				//   continue; // tenta outro ativo
-				// }
-				
-				//await clicarBotaoFinalAposSenha();
+				  botao.scrollIntoView({ behavior: "smooth", block: "center" });
+				  await new Promise(r => setTimeout(r, 100));
+				  dispararCliqueReal(botao);
+				  await new Promise(r => setTimeout(r, 600));
 
-				logCompras.push({
-				  ativo: ativo.nome,
-				  classe: classe.toUpperCase(),
-				  taxaInformada: ativo.taxa.toFixed(2) + "%",
-				  taxaEfetiva: taxaComparada.toFixed(2) + "%" + (isIsento ? " (isento IR)" : ""),
-				  valorMinimo: "R$ " + ativo.valorMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
-				  valorComprado: "R$ " + valorCompra.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
-				  vencimentoISO: ativo.vencimentoStr,
-				  vencimentoBR: (() => {
-					const [ano, mes, dia] = ativo.vencimentoStr.split("-");
-					return `${dia}/${mes}/${ano}`;
-				  })(),
+				  if (valorMinimo > saldoTotal) {
+					console.warn(`⛔ Saldo insuficiente: mínimo R$${valorMinimo} > saldo R$${saldoTotal}`);
+					return;
+				  }
 
-				  horarioCompra: new Date().toLocaleString("pt-BR")
-				});
-				
-				console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);
-				
-				//await new Promise(r => setTimeout(r, 1000));
-				//await esperarElemento("soma-table-body soma-table-row", 10000, false);
-				break; //Comentado no dia 21/07
-			}
+				  const valorIdeal = Math.min(saldoTotal, limite);
+				  const valorCompra = Math.max(valorMinimo, valorIdeal);
+
+				  const quantidadeOk = await preencherCampoQuantidadeInvestida(valorCompra, valorMinimo);
+				  if (!quantidadeOk) return;
+
+				  await marcarCheckboxConfirmacao();
+				  await clicarBotaoAvancarEtapa();
+				  await new Promise(r => setTimeout(r, 500));
+				  await marcarCheckboxEAvancar();
+				  await digitarSenhaEletronica(assinatura); // pode remover o fallback do || true
+
+				  logCompras.push({
+					ativo: nome,
+					classe: classe.toUpperCase(),
+					taxaInformada: taxa.toFixed(2) + "%",
+					taxaEfetiva: taxaEfetiva.toFixed(2) + (isIsento ? "% (isento IR)" : "%"),
+					valorMinimo: "R$ " + valorMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
+					valorComprado: "R$ " + valorCompra.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
+					vencimentoISO: vencimentoStr,
+					vencimentoBR: (() => {
+					  const [ano, mes, dia] = vencimentoStr.split("-");
+					  return `${dia}/${mes}/${ano}`;
+					})(),
+					horarioCompra: new Date().toLocaleString("pt-BR")
+				  });
+
+				  console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);
+				}
+		    }	
+
 		}
 	}  
 	

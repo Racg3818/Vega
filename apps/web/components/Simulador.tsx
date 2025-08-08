@@ -47,6 +47,8 @@ export default function Simulador() {
   const [cdi, setCdi] = useState<number | null>(null);
   const [ipca, setIpca] = useState<number | null>(null);
   const [mostrarResultado, setMostrarResultado] = useState(false);
+  const [isento, setIsento] = useState(false);
+
 
   const hoje = new Date();
   const dataFim = vencimento ? parseISO(vencimento) : null;
@@ -94,8 +96,8 @@ export default function Simulador() {
         setIpca(data.ipca);
       })
       .catch(() => {
-        setCdi(11.81);
-        setIpca(5.32);
+        setCdi(11.0);
+        setIpca(5.0);
       });
   }, []);
 
@@ -112,8 +114,25 @@ export default function Simulador() {
   const meses = dataFim ? differenceInMonths(dataFim, hoje) : 0;
 
   let taxaEfetiva = taxa;
-  if (tipoIndexador === "pos" && cdi !== null) taxaEfetiva = (cdi * taxa) / 100;
-  if (tipoIndexador === "ipca" && ipca !== null) taxaEfetiva = ipca + taxa;
+
+  if (tipoIndexador === "pos" && cdi !== null) {
+	 taxaEfetiva = (cdi * taxa) / 100;
+  }
+
+  if (tipoIndexador === "ipca" && ipca !== null) {
+	 taxaEfetiva = ipca + taxa;
+  }
+
+  // Aplica gross-up se for isento
+  if (isento) {
+	  let aliquotaTemp = 0.225;
+	  if (diasCorridos > 180 && diasCorridos <= 360) aliquotaTemp = 0.20;
+	  else if (diasCorridos > 360 && diasCorridos <= 720) aliquotaTemp = 0.175;
+	  else if (diasCorridos > 720) aliquotaTemp = 0.15;
+
+	  taxaEfetiva = taxaEfetiva / (1 - aliquotaTemp);
+  }
+
 
   let rendimentoBruto = 0;
   if (tipoIndexador === "ipca" && ipca !== null) {
@@ -127,8 +146,9 @@ export default function Simulador() {
   else if (diasCorridos > 360 && diasCorridos <= 720) aliquota = 0.175;
   else if (diasCorridos > 720) aliquota = 0.15;
 
-  const impostoRenda = rendimentoBruto * aliquota;
+  const impostoRenda = isento ? 0 : rendimentoBruto * aliquota;
   const rendimentoLiquido = rendimentoBruto - impostoRenda;
+
 
   // 💰 NOVO CÁLCULO DE SERVIÇO
   const mensalidadeFixa = 20.0;
@@ -162,7 +182,7 @@ export default function Simulador() {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <div>
             <label className="vega-label flex items-center gap-2 mb-1"><CircleDollarSign className="w-4 h-4" /> Valor aplicado (R$)</label>
             <input type="text" value={valorInput} onChange={(e) => {
@@ -182,6 +202,16 @@ export default function Simulador() {
             <label className="vega-label flex items-center gap-2 mb-1"><CalendarDays className="w-4 h-4" /> Data de vencimento</label>
             <input type="date" value={vencimento} onChange={(e) => setVencimento(e.target.value)} className="bg-vega-surface text-vega-text p-3 rounded w-full" />
           </div>
+		  <div className="flex items-center gap-2 pt-8">
+			  <input
+				type="checkbox"
+				id="isento"
+				checked={isento}
+				onChange={() => setIsento(!isento)}
+			  />
+			  <label htmlFor="isento" className="vega-label">Isento de IR</label>
+			</div>
+
         </div>
       </div>
 

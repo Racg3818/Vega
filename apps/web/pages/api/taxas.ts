@@ -1,4 +1,3 @@
-// pages/api/taxas.ts
 import { NextApiRequest, NextApiResponse } from "next";
 import * as cheerio from "cheerio";
 
@@ -15,7 +14,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const $cdi = cheerio.load(cdiHtml);
     const $ipca = cheerio.load(ipcaHtml);
 
-    const cdiTexto = $cdi("strong.value").first().text().replace(",", ".").trim();
+    // Tentativa principal: StatusInvest
+    let cdiTexto = $cdi("strong.value").first().text().replace(",", ".").trim();
+    let cdi = parseFloat(cdiTexto);
+
+    // Fallback: MaisRetorno
+    if (isNaN(cdi)) {
+      const maisRetornoRes = await fetch("https://maisretorno.com/indice/cdi");
+      const maisRetornoHtml = await maisRetornoRes.text();
+      const $mr = cheerio.load(maisRetornoHtml);
+
+      const fallbackCdiTexto = $mr("section:contains('Rentabilidade 12M') span")
+        .first()
+        .text()
+        .replace("%", "")
+        .replace(",", ".")
+        .trim();
+
+      cdi = parseFloat(fallbackCdiTexto);
+    }
+
+    // IPCA
     const ipcaTexto = $ipca("h3:contains('IPCA acumulado de 12 meses')")
       .next("p.variavel-dado")
       .text()
@@ -23,7 +42,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .replace(",", ".")
       .trim();
 
-    const cdi = parseFloat(cdiTexto);
     const ipca = parseFloat(ipcaTexto);
 
     if (isNaN(cdi) || isNaN(ipca)) {

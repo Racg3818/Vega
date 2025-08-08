@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { parse, differenceInBusinessDays } from "date-fns";
 import { supabase } from "../lib/supabaseClient";
-
+import { parse, parseISO, format, differenceInBusinessDays } from "date-fns";
 
 type Compra = {
   ativo: string;
@@ -23,6 +22,8 @@ type PosicaoBanco = {
   fgcFuturo: boolean;
   taxaMedia: number;
   vencimentoMedio: string;
+  vencimentos: string[];
+  ativos: Compra[]; // Novo campo com os ativos do banco
 };
 
 export default function Posicoes() {
@@ -32,6 +33,8 @@ export default function Posicoes() {
   const [bancosUnicos, setBancosUnicos] = useState<string[]>([]);
   const [cdi, setCdi] = useState(0.11);
   const [ipca, setIpca] = useState(0.05);
+  const [bancosAbertos, setBancosAbertos] = useState<Record<string, boolean>>({});
+
 
   function extrairBanco(ativo: string): string {
     const partes = ativo.split("-");
@@ -41,9 +44,9 @@ export default function Posicoes() {
     return semTipo.trim() || "Outro";
   }
 
-  function calcularValorFuturo(valor: number, taxaAnual: number, diasUteis: number) {
-    const taxaDiaria = Math.pow(1 + taxaAnual, 1 / 252) - 1;
-    return valor * Math.pow(1 + taxaDiaria, diasUteis);
+  function calcularValorFuturoDiasUteis(valor: number, taxaAnual: number, diasUteis: number) {
+    const taxaDiariaUtil = Math.pow(1 + taxaAnual, 1 / 252) - 1;
+    return valor * Math.pow(1 + taxaDiariaUtil, diasUteis);
   }
 
   useEffect(() => {
@@ -54,12 +57,17 @@ export default function Posicoes() {
         setIpca(typeof taxas.ipca === "number" ? taxas.ipca / 100 : 0.05);
       });
   }, []);
+  
+  const toggleBanco = (banco: string) => {
+		  setBancosAbertos((prev) => ({
+			...prev,
+			[banco]: !prev[banco],
+		  }));
+		};
 
   useEffect(() => {
     const carregarDados = async () => {
-      const { data: compras, error } = await supabase
-        .from("ativos_comprados")
-        .select("*");
+      const { data: compras, error } = await supabase.from("ativos_comprados").select("*");
 
       if (error) {
         console.error("Erro ao buscar ativos:", error.message);
@@ -71,37 +79,43 @@ export default function Posicoes() {
         banco: extrairBanco(compra.nome_ativo),
         classe: compra.indexador.toUpperCase(),
         taxaEfetiva: compra.taxa_contratada,
-        valorComprado: `R$ ${Number(compra.valor_aplicado).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`,
-        vencimento: new Date(compra.vencimento).toLocaleDateString("pt-BR")
+        valorComprado: `R$ ${Number(compra.valor_aplicado).toLocaleString("pt-BR", {
+          minimumFractionDigits: 2,
+        })}`,
+        vencimento: format(parseISO(compra.vencimento), "dd/MM/yyyy")
       }));
 
-      const agrupados: Record<string, { totalAtual: number; totalFuturo: number; taxas: number[]; dias: number[] }> = {};
+      const agrupados: Record<
+        string,
+        { totalAtual: number; totalFuturo: number; taxas: number[]; dias: number[] }
+      > = {};
       let totalGeralAtual = 0;
 
       formatados.forEach((compra) => {
         const banco = compra.banco;
         const classeBruta = compra.classe.toUpperCase();
-		const classe = classeBruta === "CDI" ? "POS" : classeBruta;
+        const classe = classeBruta === "CDI" ? "POS" : classeBruta;
 
-		let taxa = 0;
-		
+        let taxa = 0;
         if (classe === "INFLACAO") {
-		  const match = compra.taxaEfetiva?.replace(/[^\d,.-]/g, "").match(/[\d,]+/);
-		  const spread = match ? parseFloat(match[0].replace(",", ".")) / 100 : 0;
-		  taxa = ipca + spread;
-		} else if (classe === "POS") {
-		  const match = compra.taxaEfetiva?.replace(/[^\d,.-]/g, "").match(/[\d,]+/);
-		  const percentualCDI = match ? parseFloat(match[0].replace(",", ".")) / 100 : 1;
-		  taxa = cdi * percentualCDI;
-		} else if (classe === "PRE") {
-		  const match = compra.taxaEfetiva?.replace(/[^\d,.-]/g, "").match(/[\d,]+/);
-		  taxa = match ? parseFloat(match[0].replace(",", ".")) / 100 : 0;
-		}
+          const match = compra.taxaEfetiva?.replace(/[^\d,.-]/g, "").match(/[\d,]+/);
+          const spread = match ? parseFloat(match[0].replace(",", ".")) / 100 : 0;
+          taxa = ipca + spread;
+        } else if (classe === "POS") {
+          const match = compra.taxaEfetiva?.replace(/[^\d,.-]/g, "").match(/[\d,]+/);
+          const percentualCDI = match ? parseFloat(match[0].replace(",", ".")) / 100 : 1;
+          taxa = cdi * percentualCDI;
+        } else if (classe === "PRE") {
+          const match = compra.taxaEfetiva?.replace(/[^\d,.-]/g, "").match(/[\d,]+/);
+          taxa = match ? parseFloat(match[0].replace(",", ".")) / 100 : 0;
+        }
 
-        const valorAtual = parseFloat(compra.valorComprado.replace("R$", "").replace(/\./g, "").replace(",", ".").trim());
+        const valorAtual = parseFloat(
+          compra.valorComprado.replace("R$", "").replace(/\./g, "").replace(",", ".").trim()
+        );
         const vencimento = parse(compra.vencimento, "dd/MM/yyyy", new Date());
         const dias = differenceInBusinessDays(vencimento, new Date());
-        const valorFuturo = calcularValorFuturo(valorAtual, taxa, dias);
+        const valorFuturo = calcularValorFuturoDiasUteis(valorAtual, taxa, dias);
 
         if (!agrupados[banco]) agrupados[banco] = { totalAtual: 0, totalFuturo: 0, taxas: [], dias: [] };
 
@@ -114,10 +128,8 @@ export default function Posicoes() {
       });
 
       const lista: PosicaoBanco[] = Object.entries(agrupados).map(([banco, dados]) => {
-        const taxaMedia = dados.taxas.reduce((a, b) => a + b, 0) / dados.taxas.length;
-        const diasMedios = dados.dias.reduce((a, b) => a + b, 0) / dados.dias.length;
-        const vencimentoEstimado = new Date();
-        vencimentoEstimado.setDate(vencimentoEstimado.getDate() + diasMedios);
+        const ativosDoBanco = formatados.filter((c) => extrairBanco(c.ativo) === banco);
+        const vencimentos = ativosDoBanco.map((c) => c.vencimento);
 
         return {
           banco,
@@ -126,8 +138,15 @@ export default function Posicoes() {
           percentual: (dados.totalAtual / totalGeralAtual) * 100,
           fgcAtual: dados.totalAtual <= 250000,
           fgcFuturo: dados.totalFuturo <= 250000,
-          taxaMedia,
-          vencimentoMedio: vencimentoEstimado.toLocaleDateString("pt-BR")
+          taxaMedia: dados.taxas.reduce((a, b) => a + b, 0) / dados.taxas.length,
+          vencimentoMedio:
+            dados.dias.length === 1
+              ? vencimentos[0]
+              : new Date(
+                  Date.now() + (dados.dias.reduce((a, b) => a + b, 0) / dados.dias.length) * 86400000
+                ).toLocaleDateString("pt-BR"),
+          vencimentos,
+          ativos: ativosDoBanco,
         };
       });
 
@@ -139,12 +158,31 @@ export default function Posicoes() {
     carregarDados();
   }, [cdi, ipca]);
 
-  const posicoesFiltradas = bancoSelecionado === "TODOS"
-    ? posicoes
-    : posicoes.filter((p) => p.banco === bancoSelecionado);
+  const posicoesFiltradas =
+    bancoSelecionado === "TODOS" ? posicoes : posicoes.filter((p) => p.banco === bancoSelecionado);
 
   const totalAtualFiltrado = posicoesFiltradas.reduce((acc, p) => acc + p.valorAtual, 0);
   const totalFuturoFiltrado = posicoesFiltradas.reduce((acc, p) => acc + p.valorFuturo, 0);
+
+  const taxaMediaPonderada =
+    totalAtualFiltrado > 0
+      ? posicoesFiltradas.reduce((acc, p) => acc + p.taxaMedia * p.valorAtual, 0) / totalAtualFiltrado
+      : 0;
+
+  const vencimentoMedioPonderado = (() => {
+    if (posicoesFiltradas.length === 0) return "-";
+    if (posicoesFiltradas.length === 1) return posicoesFiltradas[0].vencimentoMedio;
+
+    const diasMedios =
+      posicoesFiltradas.reduce(
+        (acc, p) =>
+          acc + (parse(p.vencimentoMedio, "dd/MM/yyyy", new Date()).getTime() - Date.now()) / 86400000 * p.valorAtual,
+        0
+      ) / totalAtualFiltrado;
+    const data = new Date();
+    data.setDate(data.getDate() + diasMedios);
+    return data.toLocaleDateString("pt-BR");
+  })();
 
   return (
     <div className="p-8 text-vega-text space-y-6 bg-vega-background">
@@ -159,11 +197,21 @@ export default function Posicoes() {
             className="bg-vega-surface border border-vega-border p-2 rounded"
           >
             {bancosUnicos.map((banco, idx) => (
-              <option key={idx} value={banco}>{banco}</option>
+              <option key={idx} value={banco}>
+                {banco}
+              </option>
             ))}
           </select>
         </div>
         <div className="text-base font-medium space-x-6">
+          <span>
+            <span className="text-white">Taxa Média:</span>{" "}
+            <span className="text-vega-accent">{(taxaMediaPonderada * 100).toFixed(2)}%</span>
+          </span>
+          <span>
+            <span className="text-white">Vencimento Médio:</span>{" "}
+            <span className="text-vega-accent">{vencimentoMedioPonderado}</span>
+          </span>
           <span>
             <span className="text-white">Valor Atual Total:</span>{" "}
             <span className="text-vega-accent">
@@ -189,23 +237,56 @@ export default function Posicoes() {
                 <th className="px-4 py-3">Valor no Vencimento (*)</th>
                 <th className="px-4 py-3">% do Total</th>
                 <th className="px-4 py-3">Taxa Média</th>
-                <th className="px-4 py-3">Vencimento Médio</th>
+                <th className="px-4 py-3">Vencimento</th>
                 <th className="px-4 py-3">FGC Hoje</th>
                 <th className="px-4 py-3">FGC Futuro</th>
               </tr>
             </thead>
             <tbody>
               {posicoesFiltradas.map((p, idx) => (
-                <tr key={idx} className="border-b border-vega-border hover:bg-vega-hover transition">
-                  <td className="px-4 py-2 font-medium">{p.banco}</td>
-                  <td className="px-4 py-2">R$ {p.valorAtual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                  <td className="px-4 py-2">R$ {p.valorFuturo.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                  <td className="px-4 py-2">{p.percentual.toFixed(2)}%</td>
-                  <td className="px-4 py-2">{(p.taxaMedia * 100).toFixed(2)}%</td>
-                  <td className="px-4 py-2">{p.vencimentoMedio}</td>
-                  <td className="px-4 py-2">{p.fgcAtual ? "✔️ Sim" : "❌ Não"}</td>
-                  <td className="px-4 py-2">{p.fgcFuturo ? "✔️ Sim" : "❌ Não"}</td>
-                </tr>
+                <>
+                  <tr key={idx} className="border-b border-vega-border hover:bg-vega-hover transition">
+                    <td className="px-4 py-2 font-medium cursor-pointer" onClick={() => toggleBanco(p.banco)}>
+					  {p.banco} {bancosAbertos[p.banco] ? "▾" : "▸"}
+					</td>
+
+                    <td className="px-4 py-2">R$ {p.valorAtual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                    <td className="px-4 py-2">R$ {p.valorFuturo.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                    <td className="px-4 py-2">{p.percentual.toFixed(2)}%</td>
+                    <td className="px-4 py-2">{(p.taxaMedia * 100).toFixed(2)}%</td>
+                    <td className="px-4 py-2">-</td>
+                    <td className="px-4 py-2">{p.fgcAtual ? "✔️ Sim" : "❌ Não"}</td>
+                    <td className="px-4 py-2">{p.fgcFuturo ? "✔️ Sim" : "❌ Não"}</td>
+                  </tr>
+                  {bancosAbertos[p.banco] && (
+					  <tr className="bg-vega-surface border-b border-vega-border">
+						<td colSpan={8} className="px-4 py-2">
+						  <table className="w-full text-xs text-vega-textSoft">
+							<thead>
+							  <tr>
+								<th className="text-left">Ativo</th>
+								<th className="text-left">Classe</th>
+								<th className="text-left">Taxa</th>
+								<th className="text-left">Valor Aplicado</th>
+								<th className="text-left">Vencimento</th>
+							  </tr>
+							</thead>
+							<tbody>
+							  {p.ativos?.map((a, i) => (
+								<tr key={i}>
+								  <td className="py-1">{a.ativo}</td>
+								  <td className="py-1">{a.classe}</td>
+								  <td className="py-1">{a.taxaEfetiva}</td>
+								  <td className="py-1">{a.valorComprado}</td>
+								  <td className="py-1">{a.vencimento}</td>
+								</tr>
+							  ))}
+							</tbody>
+						  </table>
+						</td>
+					  </tr>
+					)}
+                </>
               ))}
             </tbody>
           </table>
@@ -217,7 +298,8 @@ export default function Posicoes() {
       )}
 
       <div className="text-xs text-vega-textSoft mt-4">
-        ⚠️ (*) As projeções de CDI e IPCA são estimativas com base no Boletim Focus e podem sofrer alterações ao longo dos próximos meses. Os valores futuros apresentados são apenas simulações.
+        ⚠️ (*) As projeções de CDI e IPCA são estimativas com base no Boletim Focus e podem sofrer alterações ao longo dos
+        próximos meses. Os valores futuros apresentados são apenas simulações.
       </div>
     </div>
   );

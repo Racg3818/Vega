@@ -46,14 +46,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     console.log("🧾 Chamando criarFaturaVariavel para user_id:", user_id);
-    const stripeInvoice = await criarFaturaVariavel(user_id, fatura.stripe_customer_id, stripe);
+    const resultado = await criarFaturaVariavel(user_id, fatura.stripe_customer_id, stripe);
 
-    console.log("✅ Fatura criada com sucesso:", stripeInvoice.id);
-    return res.status(200).json({
-      sucesso: true,
-      invoice_id: stripeInvoice.id,
-      mensagem: "Fatura variável criada com sucesso"
-    });
+	if (resultado?.status === "sem_cobranca") {
+	  console.log("🟡 Fatura não gerada: valor total muito baixo.");
+	  return res.status(200).json({
+		sucesso: true,
+		mensagem: "Sem cobrança necessária",
+		detalhes: resultado.detalhes,
+		valorTotal: resultado.valorTotal
+	  });
+	}
+
+	console.log("✅ Fatura criada com sucesso:", resultado.id);
+	return res.status(200).json({
+	  sucesso: true,
+	  invoice_id: resultado.id,
+	  mensagem: "Fatura variável criada com sucesso"
+	});
+
 
   } catch (error: any) {
     console.error("❌ Erro ao criar fatura variável:", error);

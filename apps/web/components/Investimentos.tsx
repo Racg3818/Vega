@@ -16,6 +16,15 @@ type Compra = {
   horarioCompra: string;
 };
 
+function normalizarClasse(indexador: string): "PRE" | "POS" | "INFLACAO" {
+  const idx = indexador.toUpperCase();
+  if (idx === "CDI") return "POS";
+  if (idx === "IPCA" || idx === "INFLAÇÃO" || idx === "INFLACAO") return "INFLACAO";
+  if (idx === "PRE" || idx === "PRÉ") return "PRE";
+  return "POS"; // fallback
+}
+
+
 export default function Investimentos() {
   const [dados, setDados] = useState<Compra[]>([]);
   const [filtrados, setFiltrados] = useState<Compra[]>([]);
@@ -24,6 +33,7 @@ export default function Investimentos() {
   const [totalAplicado, setTotalAplicado] = useState(0);
   const [diasRestantes, setDiasRestantes] = useState<Record<string, number[]>>({ PRE: [], POS: [], INFLACAO: [] });
   const [rentabilidades, setRentabilidades] = useState<Record<string, number[]>>({ PRE: [], POS: [], INFLACAO: [] });
+
 
   useEffect(() => {
 	  const carregarDados = async () => {
@@ -40,7 +50,7 @@ export default function Investimentos() {
 		const formatados = comprasProcessadas.map((compra: any) => {
 		  return {
 			ativo: compra.nome_ativo,
-			classe: compra.indexador.toUpperCase(),
+			classe: normalizarClasse(compra.indexador),
 			taxaInformada: compra.taxa_contratada,
 			taxaEfetiva: compra.taxa_grossup,
 			valorMinimo: `R$ ${Number(compra.valor_minimo).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`,
@@ -141,46 +151,49 @@ export default function Investimentos() {
       </div>
 
       {/* Resumos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-vega-surface rounded-xl p-6 shadow-inner space-y-4">
-          <h2 className="vega-label text-vega-accent uppercase tracking-wider">Investimentos</h2>
-          <div className="flex justify-between">
-            <div>
-              <p className="text-xs text-vega-textSoft uppercase">Total Aplicado</p>
-              <p className="text-vega-accent text-xl font-bold">
-                R$ {totalAplicado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-vega-textSoft uppercase">A vencer</p>
-              <p className="text-vega-accent text-xl font-bold">
-                {filtrados.length} ativos
-              </p>
-            </div>
-          </div>
-        </div>
+      {filtrados.length > 0 && (
+		  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+			<div className="bg-vega-surface rounded-xl p-6 shadow-inner space-y-4">
+			  <h2 className="vega-label text-vega-accent uppercase tracking-wider">Investimentos</h2>
+			  <div className="flex justify-between">
+				<div>
+				  <p className="text-xs text-vega-textSoft uppercase">Total Aplicado</p>
+				  <p className="text-vega-accent text-xl font-bold">
+					R$ {totalAplicado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+				  </p>
+				</div>
+				<div>
+				  <p className="text-xs text-vega-textSoft uppercase">A vencer</p>
+				  <p className="text-vega-accent text-xl font-bold">
+					{filtrados.length} ativos
+				  </p>
+				</div>
+			  </div>
+			</div>
 
-        <div className="bg-vega-surface rounded-xl p-6 shadow-inner space-y-4">
-          <h2 className="vega-label text-vega-accent uppercase tracking-wider">Rentabilidade Média</h2>
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-xs text-vega-textSoft uppercase">Prefixados</p>
-              <p className="text-vega-accent font-bold text-lg">{calcularMedia(rentabilidades.PRE)}%</p>
-              <p className="text-xs text-vega-textSoft">{calcularDias(diasRestantes.PRE)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-vega-textSoft uppercase">Inflação</p>
-              <p className="text-vega-accent font-bold text-lg">IPCA + {calcularMedia(rentabilidades.INFLACAO)}%</p>
-              <p className="text-xs text-vega-textSoft">{calcularDias(diasRestantes.INFLACAO)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-vega-textSoft uppercase">Pós-fixados</p>
-              <p className="text-vega-accent font-bold text-lg">{calcularMedia(rentabilidades.POS)}% CDI</p>
-              <p className="text-xs text-vega-textSoft">{calcularDias(diasRestantes.POS)}</p>
-            </div>
-          </div>
-        </div>
-      </div>
+			<div className="bg-vega-surface rounded-xl p-6 shadow-inner space-y-4">
+			  <h2 className="vega-label text-vega-accent uppercase tracking-wider">Rentabilidade Média</h2>
+			  <div className="grid grid-cols-3 gap-4 text-center">
+				<div>
+				  <p className="text-xs text-vega-textSoft uppercase">Prefixados</p>
+				  <p className="text-vega-accent font-bold text-lg">{calcularMedia(rentabilidades.PRE)}%</p>
+				  <p className="text-xs text-vega-textSoft">{calcularDias(diasRestantes.PRE)}</p>
+				</div>
+				<div>
+				  <p className="text-xs text-vega-textSoft uppercase">Inflação</p>
+				  <p className="text-vega-accent font-bold text-lg">IPCA + {calcularMedia(rentabilidades.INFLACAO)}%</p>
+				  <p className="text-xs text-vega-textSoft">{calcularDias(diasRestantes.INFLACAO)}</p>
+				</div>
+				<div>
+				  <p className="text-xs text-vega-textSoft uppercase">Pós-fixados</p>
+				  <p className="text-vega-accent font-bold text-lg">{calcularMedia(rentabilidades.POS)}% CDI</p>
+				  <p className="text-xs text-vega-textSoft">{calcularDias(diasRestantes.POS)}</p>
+				</div>
+			  </div>
+			</div>
+		  </div>
+		)}
+
 
       {/* Lista de ativos */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
