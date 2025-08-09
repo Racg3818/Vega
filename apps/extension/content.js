@@ -88,7 +88,7 @@ if (window.location.href.includes("https://experiencia.xpi.com.br/conta-corrente
 
 
     try {
-	  await new Promise(resolve => setTimeout(resolve, 1000));
+	  await new Promise(resolve => setTimeout(resolve, 500));
       const saldoCapturado = await esperarSaldo();
       console.log("💰 Saldo capturado com sucesso:", saldoCapturado);
       localStorage.setItem("saldoXP", saldoCapturado);
@@ -313,7 +313,7 @@ async function preencherCampoQuantidadeInvestida(valorCompra, valorMinimo) {
     let tentativas = 10;
     while (!campoComponente.shadowRoot && tentativas-- > 0) {
       console.log("⏳ Aguardando shadowRoot do campo de quantidade...");
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 150));
     }
 
     const input = campoComponente.shadowRoot?.querySelector("input[type='number']");
@@ -421,38 +421,25 @@ async function aplicarFiltroPorClasse(classe) {
     cdi: "Pós-fixado (CDI)"
   };
 
-  const labelClasseAtual = mapaIndexador[classe];
-  const labelsTodas = Object.values(mapaIndexador);
+  const label = mapaIndexador[classe];
+  const xpath = `//soma-chip[contains(., '${label}')]`;
+  const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
-  for (const label of labelsTodas) {
-    const xpath = `//soma-chip[contains(., '${label}')]`;
-    const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-
-    if (!chip) {
-      console.warn(`⚠️ Chip '${label}' não encontrado na tela.`);
-      continue;
-    }
-
-    const estaSelecionado = chip.getAttribute("selected") === "true";
-
-    // Desmarcar se for diferente da classe atual
-    if (label !== labelClasseAtual && estaSelecionado) {
-      chip.click();
-      console.log(`🔄 Filtro removido: ${label}`);
-      await new Promise(r => setTimeout(r, 300));
-    }
-
-    // Marcar se for a classe atual e ainda não estiver selecionada
-    if (label === labelClasseAtual && !estaSelecionado) {
-      chip.click();
-      console.log(`✅ Filtro aplicado: ${label}`);
-      await new Promise(r => setTimeout(r, 300));
-    }
+  if (!chip) {
+    console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
+    return false;
   }
 
-  // Aguarda os ativos recarregarem
-  await new Promise(r => setTimeout(r, 1500));
+  if (chip.getAttribute("selected") !== "true") {
+    chip.click();
+    console.log(`✅ Filtro aplicado: ${label}`);
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  await new Promise(r => setTimeout(r, 600)); // aguarda carregar a lista
+  return true;
 }
+
 
 async function rolarAteFinalTabelaAtivos() {
   console.log("🔽 Iniciando rolagem automática da tabela para carregar todos os ativos...");
@@ -507,7 +494,7 @@ async function marcarCheckboxEAvancar() {
 
   // Aguarda o botão 'Avançar etapa' ficar habilitado
   let btnHabilitado = null;
-  tentativas = 20; // até 10 segundos
+  tentativas = 5; 
   while (tentativas-- > 0) {
     const botao = [...document.querySelectorAll("soma-button")]
       .find(b => b.getAttribute("aria-label")?.toLowerCase().includes("avançar etapa"));
@@ -532,11 +519,11 @@ async function marcarCheckboxEAvancar() {
 }
 
 async function digitarSenhaEletronica(senha) {
-  const teclas = senha.split(""); // exemplo: "845137" → ["8", "4", "5", "1", "3", "7"]
+  const teclas = senha.split(""); 
   console.log("🔐 Iniciando digitação da assinatura eletrônica...");
 
   // Aguarda o teclado aparecer
-  let tentativas = 10;
+  let tentativas = 5;
   let teclado = null;
   while (tentativas-- > 0) {
     teclado = document.querySelector("soma-input-bank-password");
@@ -562,16 +549,16 @@ async function digitarSenhaEletronica(senha) {
       return false;
     }
 
-    dispararCliqueReal(botao); // já está definido no seu código
+    dispararCliqueReal(botao); 
     console.log(`✅ Dígito '${digito}' clicado.`);
-    await new Promise(r => setTimeout(r, 250)); // leve delay entre cliques
+    await new Promise(r => setTimeout(r, 100)); // leve delay entre cliques
   }
 
   return true;
 }
 
 async function clicarBotaoFinalAposSenha() {
-  let tentativas = 10;
+  let tentativas = 5;
   let botaoFinal = null;
 
   while (tentativas-- > 0) {
@@ -620,7 +607,7 @@ async function garantirTodosAtivosCarregados() {
     tentativasGerais++;
     
     // Pausa entre ciclos
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 800));
   }
   
   return ultimaContagem;
@@ -675,6 +662,8 @@ esperarCredenciais().then((credenciais) => {
   
 // ============ CÓDIGO PRINCIPAL ============
 async function aplicarFiltrosXP(supabase) {	
+
+  const inicioClasse = Date.now(); // ⏱ início do cronômetro para essa classe
 	
   try {
 	  
@@ -726,7 +715,7 @@ async function aplicarFiltrosXP(supabase) {
 	  // Aguarda e clica no filtro inicial
 	  try {
 		console.log("🕒 Aguardando botão 'Filtrar' aparecer na tela...");
-		const botaoFiltro = await esperarElemento("//soma-chip[contains(., 'Filtrar')]", 7000);
+		const botaoFiltro = await esperarElemento("//soma-chip[contains(., 'Filtrar')]", 3500);
 
 		if (!botaoFiltro) {
 		  console.error("❌ Botão 'Filtrar' não encontrado após aguardo.");
@@ -738,69 +727,81 @@ async function aplicarFiltrosXP(supabase) {
 		botaoFiltro.click();
 
 		console.log("✅ Botão 'Filtrar' clicado com sucesso.");
-		await new Promise((r) => setTimeout(r, 1000));
+		await new Promise((r) => setTimeout(r, 500));
 	  } catch (err) {
 		console.error("❌ Erro ao localizar ou clicar no botão 'Filtrar':", err);
 		return;
 	  }
 	
 
-		// Aplica filtros personalizados
+		// Aplica filtros personalizados (EXCETO indexador), pois o indexador será aplicado por prioridade no loop principal
 		try {
-		  console.log("🎯 Iniciando aplicação de filtros visuais...");
+		  console.log("🎯 Iniciando aplicação de filtros visuais (sem indexador)...");
 		  for (const grupo in filtros) {
-			if (["assinatura", "limite_compra", "ordem_classe", "taxa_minima"].includes(grupo)) continue;
+			// pula campos de controle e o grupo 'indexador'
+			if (["assinatura", "limite_compra", "ordem_classe", "taxa_minima", "indexador"].includes(grupo)) continue;
+
 			const valores = filtros[grupo];
 			for (const valor of valores) {
-			  
 			  let labelsParaAplicar = [];
 
-				if (grupo === "vencimento") {
-				  const todas = [
-					{ chave: "ate_6_meses", ordem: 1 },
-					{ chave: "ate_1_ano", ordem: 2 },
-					{ chave: "ate_2_anos", ordem: 3 },
-					{ chave: "ate_3_anos", ordem: 4 },
-					{ chave: "ate_5_anos", ordem: 5 },
-					{ chave: "acima_5_anos", ordem: 6 },
-				  ];
-
-				  const valorSelecionado = todas.find(t => t.chave === valor);
-				  if (valorSelecionado) {
-					labelsParaAplicar = todas
-					  .filter(t => t.ordem <= valorSelecionado.ordem)
-					  .map(t => mapa[grupo.toLowerCase()]?.[t.chave])
-					  .filter(Boolean);
-				  }
-				} else {
-				  const label = mapa[grupo.toLowerCase()]?.[valor];
-				  if (label) labelsParaAplicar = [label];
+			  if (grupo === "vencimento") {
+				const todas = [
+				  { chave: "ate_6_meses", ordem: 1 },
+				  { chave: "ate_1_ano", ordem: 2 },
+				  { chave: "ate_2_anos", ordem: 3 },
+				  { chave: "ate_3_anos", ordem: 4 },
+				  { chave: "ate_5_anos", ordem: 5 },
+				  { chave: "acima_5_anos", ordem: 6 },
+				];
+				const valorSelecionado = todas.find(t => t.chave === valor);
+				if (valorSelecionado) {
+				  labelsParaAplicar = todas
+					.filter(t => t.ordem <= valorSelecionado.ordem)
+					.map(t => mapa[grupo.toLowerCase()]?.[t.chave])
+					.filter(Boolean);
 				}
+			  } else {
+				const label = mapa[grupo.toLowerCase()]?.[valor];
+				if (label) labelsParaAplicar = [label];
+			  }
 
-				for (const label of labelsParaAplicar) {
-				  const xpath = `//soma-chip[contains(., '${label}')]`;
-				  const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-				  if (chip) {
-					chip.click();
-					console.log(`✅ Filtro aplicado: [${grupo}] → ${label}`);
-				  } else {
-					console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
-				  }
-				  await new Promise(r => setTimeout(r, 300));
-				}		  
-			  
+			  for (const label of labelsParaAplicar) {
+				const xpath = `//soma-chip[contains(., '${label}')]`;
+				const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+				if (chip) {
+				  chip.click();
+				  console.log(`✅ Filtro aplicado: [${grupo}] → ${label}`);
+				} else {
+				  console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
+				}
+				await new Promise(r => setTimeout(r, 300));
+			  }
+
 			  await new Promise(r => setTimeout(r, 300));
 			}
 		  }
-		  console.log("✅ Filtros visuais aplicados com sucesso.");
+		  console.log("✅ Filtros visuais aplicados (indexador será aplicado por prioridade depois).");
 		} catch (err) {
 		  console.error("❌ Erro ao aplicar filtros visuais:", err);
 		}
 
+
 		// Variáveis de controle
 		const assinatura = filtros.assinatura;
 		const limite = filtros.limite_compra;
-		let ordem = filtros.ordem_classe;
+		
+		// apenas classes marcadas no grupo "indexador"
+		const selecionadas = Array.isArray(filtros.indexador) ? filtros.indexador : [];
+
+		// prioriza pela ordem escolhida, mas só com o que está selecionado
+		let ordem =
+		  Array.isArray(filtros.ordem_classe) && filtros.ordem_classe.length
+			? filtros.ordem_classe.filter((c) => selecionadas.includes(c))
+			: (selecionadas.length ? selecionadas : ["cdi"]);
+			
+		console.log("Ordem de classes priorizadas:", ordem)
+			
 		const taxasMin = filtros.taxa_minima || { cdi: 0, ipca: 0, pre_fixado: 0 };
 		const filtrosAplicMin = filtros.aplicacao_minima || [];
 
@@ -809,11 +810,9 @@ async function aplicarFiltrosXP(supabase) {
 		  return filtrosAplicMin.some(chave => restricoesAplicMin[chave]?.(valor));
 		}
 
-		if (!Array.isArray(ordem)) ordem = ["cdi", "ipca", "pre_fixado"];
-
 		try {
 		  console.log("🕒 Aguardando carregamento da tabela de ativos...");
-		  await esperarElemento("soma-table-body soma-table-row", 5000, false);
+		  await esperarElemento("soma-table-body soma-table-row", 2000, false);
 		  await forcarCarregamentoCompleto();
 		  
 		} catch (err) {
@@ -827,10 +826,11 @@ async function aplicarFiltrosXP(supabase) {
 
 		for (const classe of ordem) {
 			
-		  await aplicarFiltroPorClasse(classe);
+		  const chipOk = await aplicarFiltroPorClasse(classe);
+	      if (!chipOk) continue; // não tenta processar classe que não existe/visível
 
 		  try {
-			await esperarElemento("soma-table-body soma-table-row", 5000, false);
+			await esperarElemento("soma-table-body soma-table-row", 2000, false);
 			await new Promise(r => setTimeout(r, 500));
 			console.log(`✅ Tabela de ativos carregada para classe: ${classe}`);
 		  } catch (err) {
@@ -1051,7 +1051,7 @@ async function aplicarFiltrosXP(supabase) {
 				  botao.scrollIntoView({ behavior: "smooth", block: "center" });
 				  await new Promise(r => setTimeout(r, 100));
 				  dispararCliqueReal(botao);
-				  await new Promise(r => setTimeout(r, 600));
+				  await new Promise(r => setTimeout(r, 500));
 
 				  if (valorMinimo > saldoTotal) {
 					console.warn(`⛔ Saldo insuficiente: mínimo R$${valorMinimo} > saldo R$${saldoTotal}`);
@@ -1068,8 +1068,9 @@ async function aplicarFiltrosXP(supabase) {
 				  await clicarBotaoAvancarEtapa();
 				  await new Promise(r => setTimeout(r, 500));
 				  await marcarCheckboxEAvancar();
-				  await digitarSenhaEletronica(assinatura); // pode remover o fallback do || true
-
+				  
+				  const senhaOk = await digitarSenhaEletronica(assinatura); 
+				  
 				  logCompras.push({
 					ativo: nome,
 					classe: classe.toUpperCase(),
@@ -1085,11 +1086,27 @@ async function aplicarFiltrosXP(supabase) {
 					horarioCompra: new Date().toLocaleString("pt-BR")
 				  });
 
-				  console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);
+				  console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);				  
+				  				
+				
+				// ⚠️ BYPASS DE TESTE ATIVO:
+				// Comentado temporariamente para permitir testes mesmo com assinatura incorreta
+				if (senhaOk) {
+				    await clicarBotaoFinalAposSenha();   
+				 }
+				else{
+					 console.warn("⚠️ A senha eletrônica não pôde ser digitada.");
+				   continue; // tenta outro ativo
+				}				
+				
+				
 				}
 		    }	
 
 		}
+		
+		const fimClasse = Date.now(); // ⏱ fim do cronômetro
+		console.log(`⏱ Tempo para comprar os ativos: ${((fimClasse - inicioClasse) / 1000).toFixed(2)} segundos`);
 	}  
 	
 	if (logCompras.length > 0) {
